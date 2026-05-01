@@ -94,7 +94,8 @@ public class AuthService {
                 accessToken,
                 newRefreshToken,
                 "Bearer",
-                jwtService.getAccessTokenExpiresInSeconds()
+                jwtService.getAccessTokenExpiresInSeconds(),
+                user.getEmail()
         );
     }
 
@@ -127,7 +128,8 @@ public class AuthService {
                 token,
                 createRefreshToken(user),
                 "Bearer",
-                jwtService.getAccessTokenExpiresInSeconds()
+                jwtService.getAccessTokenExpiresInSeconds(),
+                user.getEmail()
         );
     }
 }

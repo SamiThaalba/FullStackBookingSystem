@@ -24,7 +24,6 @@ import java.util.List;
 @RequestMapping("/api/availability")
 @RequiredArgsConstructor
 @Tag(name = "Availability & Pricing", description = "Check availability by date range and guests, get price")
-@PreAuthorize("hasAuthority('availability:view')")
 public class AvailabilityPricingController {
 
     private final RoomTypeRepository roomTypeRepository;

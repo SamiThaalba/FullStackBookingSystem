@@ -5,6 +5,7 @@ export default function BookingConfirmation() {
   const { bookingId } = useParams();
   const { state } = useLocation();
   const booking = state?.booking;
+  const payment = state?.payment;
 
   return (
     <section className="container confirmation-page">
@@ -13,8 +14,13 @@ export default function BookingConfirmation() {
         <h1>Sleep easy. Your stay is booked.</h1>
         <p>
           Your booking reference is <strong>#{booking?.id || bookingId}</strong>. A mock payment
-          record was created when the backend payment permission allows it.
+          was processed successfully to complete your booking.
         </p>
+        {payment?.id ? (
+          <p className="muted">
+            Payment #{payment.id} · {money(payment.amount)} · {payment.status}
+          </p>
+        ) : null}
         {booking && (
           <div className="summary-grid">
             <div>

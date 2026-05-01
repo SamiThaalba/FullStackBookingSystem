@@ -1,15 +1,21 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Navigate, useSearchParams } from "react-router-dom";
 import { bookingApi } from "../api/bookingApi";
+import { useAuth } from "../auth/AuthContext";
 import Alert from "../components/Alert";
 import HotelCard from "../components/HotelCard";
 import SearchPanel from "../components/SearchPanel";
 
 export default function Hotels() {
+  const auth = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [page, setPage] = useState(Number(searchParams.get("page") || 0));
   const [country, setCountry] = useState("");
+
+  if (auth.isAuthenticated && !auth.isCustomer) {
+    return <Navigate to={auth.isAdmin ? "/admin/roles" : "/dashboard"} replace />;
+  }
 
   const filters = useMemo(
     () => ({
@@ -28,10 +34,17 @@ export default function Hotels() {
   });
 
   const hotels = hotelsQuery.data?.content || [];
+  const cityOptions = useMemo(() => {
+    const unique = new Set();
+    hotels.forEach((hotel) => {
+      if (hotel?.city) unique.add(hotel.city);
+    });
+    return Array.from(unique).sort((a, b) => a.localeCompare(b));
+  }, [hotels]);
 
   function changePage(nextPage) {
     setPage(nextPage);
-    const next = new R(searchParams);
+    const next = new URLSearchParams(searchParams);
     next.set("page", nextPage);
     setSearchParams(next);
   }
@@ -41,11 +54,15 @@ export default function Hotels() {
       <SearchPanel
         compact
         initialValues={{
-          city: searchParams.get("city") || "Aston",
+          city: searchParams.get("city") || "",
           from: searchParams.get("from") || undefined,
           to: searchParams.get("to") || undefined,
-          guests: searchParams.get("guests") || 1,
+          adults: searchParams.get("adults") || 2,
+          children: searchParams.get("children") || 0,
+          rooms: searchParams.get("rooms") || 1,
+          work: searchParams.get("work") === "1",
         }}
+        cityOptions={cityOptions}
       />
 
       <div className="results-toolbar">

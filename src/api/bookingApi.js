@@ -42,6 +42,8 @@ export const bookingApi = {
 
   getRoomTypes: (hotelId) => apiRequest(`/room-type/hotel/${hotelId}`),
 
+  getRoomType: (roomTypeId) => apiRequest(`/room-type/${roomTypeId}`),
+
   createRoomType: (payload) =>
     apiRequest("/room-type", {
       method: "POST",
@@ -85,6 +87,93 @@ export const bookingApi = {
     apiRequest("/payments", {
       method: "POST",
       body: JSON.stringify({ bookingId }),
+    }),
+
+  processPayment: (paymentId, success = true) =>
+    apiRequest(`/payments/${paymentId}/process?${toQuery({ success: success ? "true" : "false" })}`, {
+      method: "POST",
+    }),
+
+  confirmBooking: (bookingId) =>
+    apiRequest(`/bookings/${bookingId}/confirm`, {
+      method: "PUT",
+    }),
+
+  wishlist: () => apiRequest("/wishlist"),
+
+  addToWishlist: (payload) =>
+    apiRequest("/wishlist", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  removeFromWishlist: ({ itemType, targetId }) =>
+    apiRequest(`/wishlist?${toQuery({ itemType, targetId })}`, {
+      method: "DELETE",
+    }),
+
+  myAlerts: () => apiRequest("/alerts"),
+
+  createAlert: (payload) =>
+    apiRequest("/alerts", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  activateAlert: (id) =>
+    apiRequest(`/alerts/${id}/activate`, {
+      method: "PATCH",
+    }),
+
+  deactivateAlert: (id) =>
+    apiRequest(`/alerts/${id}/deactivate`, {
+      method: "PATCH",
+    }),
+
+  notifications: () => apiRequest("/notifications"),
+
+  markNotificationRead: (id) =>
+    apiRequest(`/notifications/${id}/read`, {
+      method: "PATCH",
+    }),
+
+  markAllNotificationsRead: () =>
+    apiRequest("/notifications/read-all", {
+      method: "PATCH",
+    }),
+
+  unreadNotificationCount: () => apiRequest("/notifications/unread-count"),
+
+  adminRoles: () => apiRequest("/admin/roles"),
+
+  adminPermissions: () => apiRequest("/admin/permissions"),
+
+  adminCreateRole: (payload) =>
+    apiRequest("/admin/roles", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  adminCreatePermission: (payload) =>
+    apiRequest("/admin/permissions", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  adminReplaceRolePermissions: (roleId, payload) =>
+    apiRequest(`/admin/roles/${roleId}/permissions`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+
+  adminAssignRoleToUser: (userId, roleId) =>
+    apiRequest(`/admin/users/${userId}/roles/${roleId}`, {
+      method: "POST",
+    }),
+
+  adminRemoveRoleFromUser: (userId, roleId) =>
+    apiRequest(`/admin/users/${userId}/roles/${roleId}`, {
+      method: "DELETE",
     }),
 };
 

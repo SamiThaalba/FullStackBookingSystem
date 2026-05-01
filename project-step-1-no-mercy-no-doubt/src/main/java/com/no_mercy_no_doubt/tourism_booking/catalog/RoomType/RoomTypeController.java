@@ -10,7 +10,6 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/room-type")
-@PreAuthorize("isAuthenticated()")
 public class RoomTypeController {
 
     private final RoomTypeService service;
@@ -28,13 +27,11 @@ public class RoomTypeController {
     }
 
     @GetMapping("/hotel/{hotelId}")
-    @PreAuthorize("hasAuthority('room:view')")
     public ResponseEntity<List<RoomTypeResponse>> getRoomTypesByHotel(@PathVariable long hotelId) {
         return ResponseEntity.ok(service.getRoomTypesByHotel(hotelId));
     }
 
     @GetMapping("/{roomTypeId}")
-    @PreAuthorize("hasAuthority('room:view')")
     public ResponseEntity<RoomTypeResponse> getRoomTypeById(@PathVariable long roomTypeId) {
         return ResponseEntity.ok(service.getRoomTypeById(roomTypeId));
     }

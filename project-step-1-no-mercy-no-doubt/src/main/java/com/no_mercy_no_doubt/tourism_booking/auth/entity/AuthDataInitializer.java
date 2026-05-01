@@ -64,6 +64,7 @@ public class AuthDataInitializer implements CommandLineRunner {
 
         permissions.put("payment:create", "Create payments");
         permissions.put("payment:view", "View payments");
+        permissions.put("payment:update", "Process payments (mock)");
 
         permissions.put("wishlist:manage", "Manage wishlist and alerts");
         permissions.put("notification:view", "View notifications");
@@ -82,20 +83,19 @@ public class AuthDataInitializer implements CommandLineRunner {
     }
 
     private void seedRoles() {
-        if (!adminBootstrapEnabled) {
-            return;
-        }
+        // Roles/permissions must exist even if admin bootstrap is disabled,
+        // because registration assigns the CUSTOMER role.
         if (adminUsername == null || adminUsername.isBlank()
                 || adminEmail == null || adminEmail.isBlank()
                 || adminPassword == null || adminPassword.isBlank()) {
-            return;
+            // Still seed roles; only admin user creation depends on these values.
         }
         createOrUpdateRole("ADMIN", "System administrator", Set.of(
                 "hotel:create", "hotel:view", "hotel:update", "hotel:delete",
                 "room:create", "room:view", "room:update", "room:delete",
                 "availability:view", "recommendation:view", "analytics:view",
                 "booking:create", "booking:view", "booking:update", "booking:cancel",
-                "payment:create", "payment:view",
+                "payment:create", "payment:view", "payment:update",
                 "wishlist:manage", "notification:view",
                 "user:manage", "role:manage"
         ));
@@ -105,13 +105,13 @@ public class AuthDataInitializer implements CommandLineRunner {
                 "room:view", "room:create", "room:update",
                 "availability:view", "recommendation:view", "analytics:view",
                 "booking:view", "booking:update",
-                "payment:view", "notification:view"
+                "payment:view", "payment:update", "notification:view"
         ));
 
         createOrUpdateRole("CUSTOMER", "Customer role", Set.of(
                 "hotel:view", "room:view", "availability:view", "recommendation:view",
-                "booking:create", "booking:view", "booking:cancel",
-                "payment:create", "payment:view",
+                "booking:create", "booking:view", "booking:update", "booking:cancel",
+                "payment:create", "payment:view", "payment:update",
                 "wishlist:manage", "notification:view"
         ));
     }
@@ -131,6 +131,9 @@ public class AuthDataInitializer implements CommandLineRunner {
     }
 
     private void seedAdminUser() {
+        if (!adminBootstrapEnabled) {
+            return;
+        }
         Role adminRole = roleRepository.findByName("ADMIN")
                 .orElseThrow(() -> new BusinessException("ADMIN role was not found."));
 

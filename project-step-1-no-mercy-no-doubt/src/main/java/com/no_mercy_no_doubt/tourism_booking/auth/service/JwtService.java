@@ -46,7 +46,12 @@ public class JwtService {
                 .toList();
 
         return generateToken(
-                Map.of("id", user.getId(), "roles", roles, "permissions", permissions),
+                Map.of(
+                        "id", user.getId(),
+                        "email", user.getEmail(),
+                        "roles", roles,
+                        "permissions", permissions
+                ),
                 user.getUsername()
         );
     }

@@ -23,7 +23,6 @@ public class HotelController {
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasAuthority('hotel:view')")
     public ResponseEntity<HotelResponse> GetHotel(@PathVariable long id) {
         return ResponseEntity.ok(service.getHotelById(id));
     }
@@ -48,7 +47,6 @@ public class HotelController {
     }
 
     @GetMapping
-    @PreAuthorize("hasAuthority('hotel:view')")
     public ResponseEntity<PageResponse<HotelResponse>> getHotels(@RequestParam(required = false) Integer page,
                                                                  @RequestParam(required = false) Integer size,
                                                                  @RequestParam(required = false) String name,

@@ -40,8 +40,10 @@ export function AuthProvider({ children }) {
     auth,
     user,
     isAuthenticated: Boolean(auth?.accessToken),
-    isManager: hasAny(user, ["MANAGER", "ADMIN"]),
+    // Manager dashboard and hotel ops: MANAGER only (ADMIN uses Admin UI, not Manager dashboard)
+    isManager: hasAny(user, ["MANAGER"]),
     isAdmin: hasAny(user, ["ADMIN"]),
+    isCustomer: hasAny(user, ["CUSTOMER"]) && !hasAny(user, ["MANAGER", "ADMIN"]),
     hasPermission: (permission) => user?.permissions?.includes(permission),
     signIn,
     signUp,
@@ -63,7 +65,9 @@ function decodeUser(token) {
     const [, payload] = token.split(".");
     const decoded = JSON.parse(window.atob(payload.replace(/-/g, "+").replace(/_/g, "/")));
     return {
+      id: decoded.id ?? null,
       username: decoded.sub,
+      email: decoded.email ?? null,
       roles: decoded.roles || [],
       permissions: decoded.permissions || [],
       exp: decoded.exp,

@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { bookingApi } from "../api/bookingApi";
+import { useAuth } from "../auth/AuthContext";
 import Alert from "../components/Alert";
 import { formatDate, money } from "../utils/format";
 
@@ -28,8 +29,10 @@ const emptyRoom = {
 
 export default function Dashboard() {
   const queryClient = useQueryClient();
+  const auth = useAuth();
   const [hotelForm, setHotelForm] = useState(emptyHotel);
   const [roomForm, setRoomForm] = useState(emptyRoom);
+  const [selectedHotelId, setSelectedHotelId] = useState("");
 
   const hotelsQuery = useQuery({
     queryKey: ["dashboard-hotels"],
@@ -37,8 +40,8 @@ export default function Dashboard() {
   });
 
   const upcomingQuery = useQuery({
-    queryKey: ["upcoming-bookings"],
-    queryFn: () => bookingApi.upcomingBookings(),
+    queryKey: ["upcoming-bookings", selectedHotelId],
+    queryFn: () => bookingApi.upcomingBookings(selectedHotelId ? Number(selectedHotelId) : undefined),
   });
 
   const createHotel = useMutation({
@@ -59,7 +62,10 @@ export default function Dashboard() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["dashboard-hotels"] }),
   });
 
-  const hotels = hotelsQuery.data?.content || [];
+  const allHotels = hotelsQuery.data?.content || [];
+  const hotels = auth.isAdmin
+    ? allHotels
+    : allHotels.filter((hotel) => (auth.user?.id ? hotel.managerId === auth.user.id : true));
   const upcoming = upcomingQuery.data || [];
 
   return (
@@ -79,37 +85,56 @@ export default function Dashboard() {
       </Alert>
 
       <div className="dashboard-grid">
-        <form className="panel stack-form" onSubmit={(event) => submitForm(event, hotelForm, createHotel)}>
-          <h2>Create hotel</h2>
-          {Object.keys(emptyHotel).map((field) => (
-            <label key={field}>
-              {labelFor(field)}
-              <input
-                type={field === "email" ? "email" : field === "managerId" ? "number" : "text"}
-                value={hotelForm[field]}
-                onChange={(event) => setHotelForm({ ...hotelForm, [field]: event.target.value })}
-                required={["name", "address", "city", "country", "managerId"].includes(field)}
-              />
-            </label>
-          ))}
-          <button className="btn btn-teal" disabled={createHotel.isPending}>
-            {createHotel.isPending ? "Creating..." : "Create hotel"}
-          </button>
-        </form>
+        {auth.hasPermission("hotel:create") ? (
+          <form className="panel stack-form" onSubmit={(event) => submitForm(event, hotelForm, createHotel)}>
+            <h2>Create hotel</h2>
+            {Object.keys(emptyHotel).map((field) => (
+              <label key={field}>
+                {labelFor(field)}
+                <input
+                  type={field === "email" ? "email" : field === "managerId" ? "number" : "text"}
+                  value={hotelForm[field]}
+                  onChange={(event) => setHotelForm({ ...hotelForm, [field]: event.target.value })}
+                  required={["name", "address", "city", "country", "managerId"].includes(field)}
+                />
+              </label>
+            ))}
+            <button className="btn btn-teal" disabled={createHotel.isPending}>
+              {createHotel.isPending ? "Creating..." : "Create hotel"}
+            </button>
+          </form>
+        ) : null}
 
         <form className="panel stack-form" onSubmit={(event) => submitForm(event, roomForm, createRoom)}>
           <h2>Add room type</h2>
-          {Object.keys(emptyRoom).map((field) => (
-            <label key={field}>
-              {labelFor(field)}
-              <input
-                type={["hotelId", "capacity", "inventoryCount", "basePrice"].includes(field) ? "number" : "text"}
-                value={roomForm[field]}
-                onChange={(event) => setRoomForm({ ...roomForm, [field]: event.target.value })}
-                required
-              />
-            </label>
-          ))}
+          <label>
+            Hotel
+            <select
+              value={roomForm.hotelId}
+              onChange={(event) => setRoomForm({ ...roomForm, hotelId: event.target.value })}
+              required
+            >
+              <option value="">Select hotel</option>
+              {hotels.map((hotel) => (
+                <option key={hotel.id} value={hotel.id}>
+                  {hotel.name} (#{hotel.id})
+                </option>
+              ))}
+            </select>
+          </label>
+          {Object.keys(emptyRoom)
+            .filter((field) => field !== "hotelId")
+            .map((field) => (
+              <label key={field}>
+                {labelFor(field)}
+                <input
+                  type={["capacity", "inventoryCount", "basePrice"].includes(field) ? "number" : "text"}
+                  value={roomForm[field]}
+                  onChange={(event) => setRoomForm({ ...roomForm, [field]: event.target.value })}
+                  required
+                />
+              </label>
+            ))}
           <button className="btn btn-teal" disabled={createRoom.isPending}>
             {createRoom.isPending ? "Adding..." : "Add room"}
           </button>
@@ -144,6 +169,19 @@ export default function Dashboard() {
 
         <div className="panel">
           <h2>Upcoming bookings</h2>
+          {hotels.length ? (
+            <label style={{ marginBottom: 12 }}>
+              <span>Hotel</span>
+              <select value={selectedHotelId} onChange={(event) => setSelectedHotelId(event.target.value)}>
+                <option value="">All my hotels</option>
+                {hotels.map((hotel) => (
+                  <option key={hotel.id} value={hotel.id}>
+                    {hotel.name} (#{hotel.id})
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
           {upcoming.length ? (
             <div className="manager-list">
               {upcoming.map((booking) => (

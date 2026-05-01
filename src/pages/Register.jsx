@@ -31,7 +31,7 @@ export default function Register() {
   return (
     <section className="auth-page container">
       <div className="auth-card">
-        <p className="eyebrow">Join Premier Inn</p>
+        <p className="eyebrow">Join QuickReserve</p>
         <h1>Create account</h1>
         <p className="muted">Registration creates a customer account when the backend CUSTOMER role is seeded.</p>
         <Alert type="error">{error}</Alert>

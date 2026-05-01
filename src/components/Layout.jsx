@@ -14,21 +14,29 @@ export default function Layout() {
     <div className="app-shell">
       <header className="site-header">
         <nav className="nav container">
-          <NavLink to="/" className="brand" aria-label="Premier Inn home">
-            <span>Premier Inn</span>
+          <NavLink to="/" className="brand" aria-label="QuickReserve home">
+            <span>QuickReserve</span>
             <span className="moon">crescent</span>
           </NavLink>
 
           <div className="nav-links">
-            <NavLink to="/hotels">Discover Premier Inn</NavLink>
-            {auth.isManager && <NavLink to="/dashboard">Business</NavLink>}
-            <NavLink to="/my-bookings">Manage booking</NavLink>
+            {!auth.isAuthenticated || auth.isCustomer ? <NavLink to="/hotels">Discover</NavLink> : null}
+            {auth.isAuthenticated && auth.isCustomer ? <NavLink to="/my-bookings">My bookings</NavLink> : null}
+            {auth.isManager && <NavLink to="/dashboard">Manager</NavLink>}
+            {auth.hasPermission("role:manage") && <NavLink to="/admin/roles">Admin</NavLink>}
           </div>
 
           <div className="nav-actions">
             {auth.isAuthenticated ? (
               <>
-                <span className="user-pill">{auth.user?.username}</span>
+                <NavLink className="user-pill" to="/profile">
+                  {auth.user?.username}
+                </NavLink>
+                {auth.hasPermission("notification:view") && (
+                  <NavLink className="btn btn-small btn-outline" to="/notifications">
+                    Notifications
+                  </NavLink>
+                )}
                 <button className="btn btn-small btn-outline" onClick={handleLogout}>
                   Log out
                 </button>
@@ -55,10 +63,10 @@ export default function Layout() {
         <div className="container footer-grid">
           <div>
             <div className="brand footer-brand">
-              <span>Premier Inn</span>
+              <span>QuickReserve</span>
               <span className="moon">crescent</span>
             </div>
-            <p>Sleep easy in trusted hotels, with fast search and secure booking.</p>
+            <p>Book stays with confidence, with fast search and secure booking.</p>
           </div>
           <div>
             <h3>Follow us</h3>

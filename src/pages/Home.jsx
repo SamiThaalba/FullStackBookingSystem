@@ -10,11 +10,11 @@ export default function Home() {
       <section className="hero">
         <div className="container hero-grid">
           <div className="hero-copy">
-            <p className="eyebrow">UK hotel search and booking</p>
-            <h1>Find your perfect stay with Premier comfort.</h1>
+            <p className="eyebrow">QuickReserve</p>
+            <h1>Find your next stay in Palestine, fast.</h1>
             <p>
-              Browse hotels, compare room types, check availability, and manage bookings
-              from one responsive web app aligned with the Spring booking backend.
+              Search trusted stays, compare room types, check live availability, and book in minutes with a smooth,
+              mobile-first experience.
             </p>
             <div className="hero-actions">
               {auth.isAuthenticated ? (
@@ -39,21 +39,21 @@ export default function Home() {
 
       <section className="container section" id="about">
         <div className="section-heading">
-          <p className="eyebrow">Built for SWER354</p>
-          <h2>Guest and manager journeys in one app</h2>
+          <p className="eyebrow">Built for real journeys</p>
+          <h2>Everything you need to book with confidence</h2>
         </div>
         <div className="feature-grid">
           <article className="feature-card">
             <h3>Guest search</h3>
-            <p>Search by city, dates, and guests with clean hotel cards and booking details.</p>
+            <p>Search by city, dates, and guests. Compare hotels and room types with clear details.</p>
           </article>
           <article className="feature-card">
             <h3>Secure booking</h3>
-            <p>JWT authentication, availability checks, booking creation, and mock payment handoff.</p>
+            <p>Instant booking flow with availability checks and a smooth mock payment experience.</p>
           </article>
           <article className="feature-card">
             <h3>Manager tools</h3>
-            <p>Protected dashboard screens for hotel and room type management plus upcoming bookings.</p>
+            <p>Manage your own hotels and room types, and review upcoming bookings in one dashboard.</p>
           </article>
         </div>
       </section>
@@ -61,16 +61,16 @@ export default function Home() {
       <section className="promo-band">
         <div className="container promo-grid">
           <div>
-            <h2>Why customers choose us</h2>
-            <p>Central locations, simple prices, family-friendly rooms, and quick booking management.</p>
+            <h2>Why guests choose QuickReserve</h2>
+            <p>Simple search, transparent pricing, and fast booking — built for a great local travel experience.</p>
           </div>
           <div className="stat-card">
-            <strong>24/7</strong>
-            <span>booking access</span>
+            <strong>Fast</strong>
+            <span>search to booking</span>
           </div>
           <div className="stat-card">
-            <strong>JWT</strong>
-            <span>secure API integration</span>
+            <strong>Smart</strong>
+            <span>price & availability alerts</span>
           </div>
         </div>
       </section>
