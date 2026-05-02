@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import Alert from "../components/Alert";
+import GoogleGIcon from "../components/GoogleGIcon";
 import { useAuth } from "../auth/AuthContext";
 import { clearBookingIntent, readBookingIntent } from "../auth/bookingIntent";
 
@@ -13,7 +14,7 @@ export default function Login() {
   const [form, setForm] = useState({ username: "", password: "" });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const googleOAuthUrl = import.meta.env.VITE_GOOGLE_OAUTH_URL;
+  const googleOAuthUrl = String(import.meta.env.VITE_GOOGLE_OAUTH_URL ?? "").trim();
 
   async function submit(event) {
     event.preventDefault();
@@ -37,7 +38,6 @@ export default function Login() {
       <div className="auth-card">
         <p className="eyebrow">{t("login.eyebrow")}</p>
         <h1>{t("login.title")}</h1>
-        <p className="muted">{t("login.hint")}</p>
         <Alert type="error">{error}</Alert>
         <form className="stack-form" onSubmit={submit}>
           <label>
@@ -63,24 +63,25 @@ export default function Login() {
             {loading ? t("login.submitting") : t("login.submit")}
           </button>
         </form>
-        {googleOAuthUrl ? (
-          <button
-            type="button"
-            className="btn btn-outline btn-full"
-            onClick={() => {
-              const from = location.state?.from || "/hotels";
-              const url = new URL(googleOAuthUrl, window.location.origin);
-              url.searchParams.set("from", from);
-              window.location.assign(url.toString());
-            }}
-          >
-            {t("login.continueGoogle")}
-          </button>
-        ) : (
-          <p className="muted">{t("login.googleNotConfigured")}</p>
-        )}
+
+        <button
+          type="button"
+          className="btn btn-outline btn-full btn-google"
+          onClick={() => {
+            const from = location.state?.from || "/hotels";
+            const url = new URL(googleOAuthUrl, window.location.origin);
+            url.searchParams.set("from", from);
+            window.location.assign(url.toString());
+          }}
+        >
+          <span>{t("login.continueGoogle")}</span>
+          <GoogleGIcon width={22} height={22} />
+        </button>
+
         <p>
-          {t("login.newHere")} <Link to="/register">{t("login.createAccount")}</Link>
+          {t("login.newHere")} <Link to="/register" style={{ color:"#007AFF" }}>
+            {t("login.createAccount")}
+          </Link>
         </p>
       </div>
     </section>

@@ -71,26 +71,12 @@ export default function Notifications() {
           {notifications.map((n) => (
             <div key={n.id} className="notif-row">
               {!n.read ? <span className="notif-dot" aria-label="Unread" /> : <span />}
-              <div className="notif-icon" aria-hidden="true">
-                {iconFor(n)}
-              </div>
               <div>
                 <strong>{n.title || "Notification"}</strong>
                 <p style={{ margin: "6px 0 0" }}>{n.message || <span className="muted">—</span>}</p>
                 <p className="muted" style={{ margin: "6px 0 0" }}>
                   {n.createdAt ? formatDate(n.createdAt) : "—"}
                 </p>
-              </div>
-              <div>
-                {!n.read ? (
-                  <button
-                    className="btn btn-small btn-outline"
-                    disabled={markReadMutation.isPending}
-                    onClick={() => markReadMutation.mutate(n.id)}
-                  >
-                    Mark read
-                  </button>
-                ) : null}
               </div>
             </div>
           ))}

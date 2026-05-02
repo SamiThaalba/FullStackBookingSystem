@@ -59,13 +59,12 @@
   },
   "hotels": {
     "filterBy": "Filter by",
-    "recommended": "Recommended",
-    "bethlehemShort": "Bethlehem",
-    "bethlehemFull": "Bethlehem (full)",
+    "countryFilter": "Country",
+    "allCountries": "All countries",
     "mapView": "Map view",
     "loading": "Loading hotels...",
     "noResultsTitle": "No hotels found",
-    "noResultsBody": "Try another city or check that hotel data exists in the backend database.",
+    "noResultsBody": "Try another city or another filter.",
     "previous": "Previous",
     "next": "Next",
     "pageOf": "Page {{page}} of {{total}}"

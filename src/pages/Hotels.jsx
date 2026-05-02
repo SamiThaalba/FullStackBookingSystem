@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Navigate, useSearchParams } from "react-router-dom";
 import { bookingApi } from "../api/bookingApi";
@@ -8,12 +8,15 @@ import Alert from "../components/Alert";
 import HotelCard from "../components/HotelCard";
 import SearchPanel from "../components/SearchPanel";
 
+/** Typical seed country for this project; merged with values returned from `/api/hotels`. */
+const DEFAULT_COUNTRY_FILTERS = ["Palestine"];
+
 export default function Hotels() {
   const { t } = useTranslation();
   const auth = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [page, setPage] = useState(Number(searchParams.get("page") || 0));
-  const [country, setCountry] = useState("");
+  const page = Number(searchParams.get("page") || 0) || 0;
+  const country = searchParams.get("country") || "";
 
   if (auth.isAuthenticated && !auth.isCustomer) {
     return <Navigate to={auth.isAdmin ? "/admin/roles" : "/dashboard"} replace />;
@@ -44,10 +47,27 @@ export default function Hotels() {
     return Array.from(unique).sort((a, b) => a.localeCompare(b));
   }, [hotels]);
 
+  const countryOptions = useMemo(() => {
+    const unique = new Set(DEFAULT_COUNTRY_FILTERS);
+    hotels.forEach((hotel) => {
+      const c = hotel?.country?.trim();
+      if (c) unique.add(c);
+    });
+    if (country) unique.add(country.trim());
+    return Array.from(unique).sort((a, b) => a.localeCompare(b));
+  }, [hotels, country]);
+
   function changePage(nextPage) {
-    setPage(nextPage);
     const next = new URLSearchParams(searchParams);
-    next.set("page", nextPage);
+    next.set("page", String(nextPage));
+    setSearchParams(next);
+  }
+
+  function setCountryFilter(value) {
+    const next = new URLSearchParams(searchParams);
+    if (value) next.set("country", value);
+    else next.delete("country");
+    next.set("page", "0");
     setSearchParams(next);
   }
 
@@ -73,15 +93,16 @@ export default function Hotels() {
         </button>
         <select
           className="filter-button"
+          aria-label={t("hotels.countryFilter")}
           value={country}
-          onChange={(event) => {
-            setCountry(event.target.value);
-            setPage(0);
-          }}
+          onChange={(event) => setCountryFilter(event.target.value)}
         >
-          <option value="">{t("hotels.recommended")}</option>
-          <option value="BU">{t("hotels.bethlehemShort")}</option>
-          <option value="Bethlehem">{t("hotels.bethlehemFull")}</option>
+          <option value="">{t("hotels.allCountries")}</option>
+          {countryOptions.map((c) => (
+            <option value={c} key={c}>
+              {c}
+            </option>
+          ))}
         </select>
         <button className="filter-button" type="button">
           {t("hotels.mapView")}

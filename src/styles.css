@@ -180,6 +180,13 @@ select {
 .btn-full {
   width: 100%;
 }
+.btn-google {
+  margin-top:20px ;
+}
+.btn-google svg {
+  flex-shrink: 0;
+  
+}
 
 .hero {
   padding: 58px 0 70px;

@@ -59,13 +59,12 @@
   },
   "hotels": {
     "filterBy": "تصفية حسب",
-    "recommended": "موصى به",
-    "bethlehemShort": "بيت لحم",
-    "bethlehemFull": "بيت لحم (كامل)",
+    "countryFilter": "الدولة",
+    "allCountries": "كل الدول",
     "mapView": "عرض الخريطة",
     "loading": "جاري تحميل الفنادق...",
     "noResultsTitle": "لا توجد فنادق",
-    "noResultsBody": "جرّب مدينة أخرى أو تأكد من وجود بيانات الفنادق في قاعدة البيانات.",
+    "noResultsBody": "جرّب مدينة أخرى أو فلتر أخر.",
     "previous": "السابق",
     "next": "التالي",
     "pageOf": "صفحة {{page}} من {{total}}"

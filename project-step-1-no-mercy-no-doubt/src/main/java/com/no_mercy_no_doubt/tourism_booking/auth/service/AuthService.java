@@ -16,6 +16,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
@@ -33,6 +34,57 @@ public class AuthService {
     private final RoleManagementService roleManagementService;
 
     private final long refreshTokenDays = 7;
+
+    /**
+     * Find or provision a CUSTOMER linked to Google's verified profile and return API tokens for the SPA.
+     */
+    @Transactional
+    public AuthResponse loginOrRegisterFromGoogleOAuth(String emailFromGoogle) {
+        if (emailFromGoogle == null || emailFromGoogle.isBlank()) {
+            throw new BusinessException("Google did not share an email for this account.");
+        }
+        String email = emailFromGoogle.trim().toLowerCase();
+
+        Optional<AppUser> existing = userRepository.findByEmailIgnoreCase(email);
+        if (existing.isPresent()) {
+            AppUser user = existing.get();
+            if (user.isBlocked()) {
+                throw new BusinessException("Your account has been blocked.");
+            }
+            return issueAuthResponseTokens(user);
+        }
+
+        AppUser created = AppUser.builder()
+                .username(nextUniqueOAuthUsername(email))
+                .email(email)
+                .password(passwordEncoder.encode(UUID.randomUUID().toString()))
+                .roles(roleManagementService.resolveRoles(Set.of(DEFAULT_SELF_REGISTER_ROLE)))
+                .isBlocked(false)
+                .build();
+        created = userRepository.save(created);
+        return issueAuthResponseTokens(created);
+    }
+
+    private String nextUniqueOAuthUsername(String emailNormalized) {
+        int at = emailNormalized.indexOf('@');
+        String local = at > 0 ? emailNormalized.substring(0, at) : emailNormalized;
+        String base = local.replaceAll("[^a-zA-Z0-9_]", "_");
+        if (base.isBlank()) {
+            base = "guest";
+        }
+        String candidate = base;
+        int suffix = 0;
+        while (userRepository.existsByUsername(candidate)) {
+            suffix++;
+            candidate = base + "_" + suffix;
+        }
+        return candidate;
+    }
+
+    private AuthResponse issueAuthResponseTokens(AppUser user) {
+        String jwtToken = jwtService.generateToken(user);
+        return toAuthResponse(user, jwtToken);
+    }
 
     @Transactional
     public AuthResponse register(RegisterRequest request) {

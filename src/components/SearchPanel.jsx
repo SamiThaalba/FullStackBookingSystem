@@ -1,11 +1,12 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { todayIso, tomorrowIso } from "../utils/dates";
 
 export default function SearchPanel({ compact = false, initialValues = {}, cityOptions = [] }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const cityListId = useMemo(
     () => `city-options-${Math.random().toString(16).slice(2)}`,
     [],
@@ -37,17 +38,18 @@ export default function SearchPanel({ compact = false, initialValues = {}, cityO
 
   function submit(event) {
     event.preventDefault();
-    const query = new URLSearchParams({
-      city: form.city,
-      from: form.from,
-      to: form.to,
-      guests: String(guestsTotal),
-      adults: String(form.adults),
-      children: String(form.children),
-      rooms: String(form.rooms),
-      work: form.work ? "1" : "",
-    }).toString();
-    navigate(`/hotels?${query}`);
+    const query = new URLSearchParams(searchParams);
+    query.set("city", form.city);
+    query.set("from", form.from);
+    query.set("to", form.to);
+    query.set("guests", String(guestsTotal));
+    query.set("adults", String(form.adults));
+    query.set("children", String(form.children));
+    query.set("rooms", String(form.rooms));
+    if (form.work) query.set("work", "1");
+    else query.delete("work");
+    query.delete("page");
+    navigate(`/hotels?${query.toString()}`);
   }
 
   return (

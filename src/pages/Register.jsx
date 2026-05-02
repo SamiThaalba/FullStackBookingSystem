@@ -62,7 +62,7 @@ export default function Register() {
           </button>
         </form>
         <p>
-          {t("register.haveAccount")} <Link to="/login">{t("register.logIn")}</Link>
+          {t("register.haveAccount")} <Link to="/login" style={{color:"#007AFF"}}>{t("register.logIn")}</Link>
         </p>
       </div>
     </section>
