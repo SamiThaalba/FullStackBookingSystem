@@ -162,6 +162,40 @@ export const bookingApi = {
 
     unreadNotificationCount: () =>
         apiRequest("/notifications/unread-count"),
+
+    // ── Admin ────────────────────────────────────────────────────────────────
+
+    adminRoles: () => apiRequest("/admin/roles"),
+
+    adminPermissions: () => apiRequest("/admin/permissions"),
+
+    adminCreateRole: (payload) =>
+        apiRequest("/admin/roles", {
+            method: "POST",
+            body: JSON.stringify(payload),
+        }),
+
+    adminCreatePermission: (payload) =>
+        apiRequest("/admin/permissions", {
+            method: "POST",
+            body: JSON.stringify(payload),
+        }),
+
+    adminReplaceRolePermissions: (roleId, payload) =>
+        apiRequest(`/admin/roles/${roleId}/permissions`, {
+            method: "PUT",
+            body: JSON.stringify(payload),
+        }),
+
+    adminAssignRoleToUser: (userId, roleId) =>
+        apiRequest(`/admin/users/${userId}/roles/${roleId}`, {
+            method: "POST",
+        }),
+
+    adminRemoveRoleFromUser: (userId, roleId) =>
+        apiRequest(`/admin/users/${userId}/roles/${roleId}`, {
+            method: "DELETE",
+        }),
 };
 
 function toQuery(params = {}) {
