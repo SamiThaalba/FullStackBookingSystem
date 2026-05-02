@@ -1,9 +1,14 @@
 package com.no_mercy_no_doubt.tourism_booking.catalog.RoomType;
-import com.no_mercy_no_doubt.tourism_booking.catalog.Hotel.Hotel;
+
+import com.no_mercy_no_doubt.tourism_booking.auth.entity.AppUser;
+import com.no_mercy_no_doubt.tourism_booking.auth.service.RoleManagementService;
 import com.no_mercy_no_doubt.tourism_booking.catalog.Hotel.CatalogMapper;
+import com.no_mercy_no_doubt.tourism_booking.catalog.Hotel.Hotel;
 import com.no_mercy_no_doubt.tourism_booking.catalog.Hotel.HotelRepository;
 import com.no_mercy_no_doubt.tourism_booking.common.exception.ResourceNotFoundException;
+import com.no_mercy_no_doubt.tourism_booking.common.utils.CurrentUserProvider;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -13,13 +18,20 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class RoomTypeService {
+
     private final HotelRepository hotelRepository;
     private final RoomTypeRepository roomTypeRepository;
     private final CatalogMapper mapper;
+    private final CurrentUserProvider currentUserProvider;
+    private final RoleManagementService roleManagementService;
+
     @Transactional
     public RoomTypeResponse createRoomType(RoomTypeRequest request) {
         Hotel hotel = hotelRepository.findById(request.getHotelId())
                 .orElseThrow(() -> new ResourceNotFoundException("Hotel", request.getHotelId()));
+
+        ensureCanManageHotel(hotel);
+
         RoomType roomType = mapper.toEntity(request, hotel);
         roomType = roomTypeRepository.save(roomType);
         return mapper.toRoomTypeResponse(roomType);
@@ -33,6 +45,9 @@ public class RoomTypeService {
         if (!roomType.getHotel().getId().equals(request.getHotelId())) {
             throw new ResourceNotFoundException("RoomType", roomTypeId);
         }
+
+        ensureCanManageHotel(roomType.getHotel());
+
         mapper.updateRoomType(roomType, request);
         roomType = roomTypeRepository.save(roomType);
         return mapper.toRoomTypeResponse(roomType);
@@ -43,10 +58,13 @@ public class RoomTypeService {
                 .orElseThrow(() -> new ResourceNotFoundException("RoomType", roomTypeId));
         return mapper.toRoomTypeResponse(roomType);
     }
+
     public List<RoomTypeResponse> getAllRoomTypes(Long hotelId) {
         Hotel hotel = hotelRepository.findById(hotelId)
                 .orElseThrow(() -> new ResourceNotFoundException("Hotel", hotelId));
-        return hotel.getRoomTypes().stream().map(a->mapper.toRoomTypeResponse(a)).toList();
+        return hotel.getRoomTypes().stream()
+                .map(mapper::toRoomTypeResponse)
+                .toList();
     }
 
     public List<RoomTypeResponse> getRoomTypesByHotel(Long hotelId) {
@@ -56,10 +74,28 @@ public class RoomTypeService {
     }
 
     @Transactional
-    public void deleteRoomType( Long roomTypeId) {
+    public void deleteRoomType(Long roomTypeId) {
         RoomType roomType = roomTypeRepository.findById(roomTypeId)
                 .orElseThrow(() -> new ResourceNotFoundException("RoomType", roomTypeId));
 
+        ensureCanManageHotel(roomType.getHotel());
+
         roomTypeRepository.deleteById(roomTypeId);
+    }
+
+    private void ensureCanManageHotel(Hotel hotel) {
+        AppUser currentUser = currentUserProvider.getCurrentUser();
+
+        if (roleManagementService.userHasRole(currentUser, "ADMIN")) {
+            return;
+        }
+
+        if (roleManagementService.userHasRole(currentUser, "MANAGER")
+                && hotel.getManagerId() != null
+                && hotel.getManagerId().equals(currentUser.getId())) {
+            return;
+        }
+
+        throw new AccessDeniedException("You are not allowed to manage rooms for this hotel.");
     }
 }

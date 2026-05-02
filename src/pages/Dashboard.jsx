@@ -14,7 +14,6 @@ const emptyHotel = {
   country: "UK",
   phone: "",
   email: "",
-  managerId: "",
 };
 
 const emptyRoom = {
@@ -30,189 +29,169 @@ const emptyRoom = {
 export default function Dashboard() {
   const queryClient = useQueryClient();
   const auth = useAuth();
+
   const [hotelForm, setHotelForm] = useState(emptyHotel);
   const [roomForm, setRoomForm] = useState(emptyRoom);
   const [selectedHotelId, setSelectedHotelId] = useState("");
 
   const hotelsQuery = useQuery({
-    queryKey: ["dashboard-hotels"],
-    queryFn: () => bookingApi.listHotels({ page: 0, size: 50 }),
+    queryKey: ["my-hotels"],
+    queryFn: bookingApi.getMyHotels,
   });
+
+  const hotels = hotelsQuery.data || [];
 
   const upcomingQuery = useQuery({
     queryKey: ["upcoming-bookings", selectedHotelId],
-    queryFn: () => bookingApi.upcomingBookings(selectedHotelId ? Number(selectedHotelId) : undefined),
+    queryFn: () =>
+        bookingApi.upcomingBookings(
+            selectedHotelId ? Number(selectedHotelId) : undefined
+        ),
+  });
+
+  const analyticsQuery = useQuery({
+    queryKey: ["manager-dashboard", auth.user?.id],
+    queryFn: () => bookingApi.managerDashboard(auth.user.id),
+    enabled: !!auth.user?.id,
   });
 
   const createHotel = useMutation({
-    mutationFn: (payload) => bookingApi.createHotel(normalizeHotel(payload)),
+    mutationFn: (payload) =>
+        bookingApi.createHotel({
+          ...payload,
+          managerId: auth.user.id,
+        }),
     onSuccess: () => {
       setHotelForm(emptyHotel);
-      queryClient.invalidateQueries({ queryKey: ["dashboard-hotels"] });
+      queryClient.invalidateQueries({ queryKey: ["my-hotels"] });
     },
   });
 
   const createRoom = useMutation({
-    mutationFn: (payload) => bookingApi.createRoomType(normalizeRoom(payload)),
+    mutationFn: (payload) =>
+        bookingApi.createRoomType(normalizeRoom(payload)),
     onSuccess: () => setRoomForm(emptyRoom),
   });
 
   const deleteHotel = useMutation({
     mutationFn: bookingApi.deleteHotel,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["dashboard-hotels"] }),
+    onSuccess: () =>
+        queryClient.invalidateQueries({ queryKey: ["my-hotels"] }),
   });
 
-  const allHotels = hotelsQuery.data?.content || [];
-  const hotels = auth.isAdmin
-    ? allHotels
-    : allHotels.filter((hotel) => (auth.user?.id ? hotel.managerId === auth.user.id : true));
   const upcoming = upcomingQuery.data || [];
 
   return (
-    <section className="container dashboard-page">
-      <div className="section-heading">
-        <p className="eyebrow">Business</p>
+      <section className="container dashboard-page">
         <h1>Manager dashboard</h1>
-        <p>Manage hotels, add room types, and review upcoming bookings.</p>
-      </div>
 
-      <Alert type="error">
-        {hotelsQuery.error?.message ||
-          upcomingQuery.error?.message ||
-          createHotel.error?.message ||
-          createRoom.error?.message ||
-          deleteHotel.error?.message}
-      </Alert>
+        {/* Errors */}
+        <Alert type="error">
+          {hotelsQuery.error?.message ||
+              upcomingQuery.error?.message ||
+              createHotel.error?.message}
+        </Alert>
 
-      <div className="dashboard-grid">
-        {auth.hasPermission("hotel:create") ? (
-          <form className="panel stack-form" onSubmit={(event) => submitForm(event, hotelForm, createHotel)}>
-            <h2>Create hotel</h2>
-            {Object.keys(emptyHotel).map((field) => (
-              <label key={field}>
-                {labelFor(field)}
-                <input
-                  type={field === "email" ? "email" : field === "managerId" ? "number" : "text"}
+        {/* ✅ FIX #13 */}
+        {createHotel.isSuccess && (
+            <Alert type="success">Hotel created successfully</Alert>
+        )}
+        {createRoom.isSuccess && (
+            <Alert type="success">Room type added</Alert>
+        )}
+
+        {/* ✅ FIX #12 Analytics */}
+        {analyticsQuery.data && (
+            <div className="panel">
+              <h2>Analytics</h2>
+              <p>Total revenue: {money(analyticsQuery.data.totalRevenue)}</p>
+              <p>Pending bookings: {analyticsQuery.data.pendingBookings}</p>
+            </div>
+        )}
+
+        {/* Create hotel */}
+        <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              createHotel.mutate(hotelForm);
+            }}
+        >
+          <h2>Create hotel</h2>
+
+          {Object.keys(emptyHotel).map((field) => (
+              <input
+                  key={field}
+                  placeholder={field}
                   value={hotelForm[field]}
-                  onChange={(event) => setHotelForm({ ...hotelForm, [field]: event.target.value })}
-                  required={["name", "address", "city", "country", "managerId"].includes(field)}
-                />
-              </label>
-            ))}
-            <button className="btn btn-teal" disabled={createHotel.isPending}>
-              {createHotel.isPending ? "Creating..." : "Create hotel"}
-            </button>
-          </form>
-        ) : null}
+                  onChange={(e) =>
+                      setHotelForm({ ...hotelForm, [field]: e.target.value })
+                  }
+                  required={["name", "address", "city", "country"].includes(field)}
+              />
+          ))}
 
-        <form className="panel stack-form" onSubmit={(event) => submitForm(event, roomForm, createRoom)}>
-          <h2>Add room type</h2>
-          <label>
-            Hotel
-            <select
-              value={roomForm.hotelId}
-              onChange={(event) => setRoomForm({ ...roomForm, hotelId: event.target.value })}
-              required
-            >
-              <option value="">Select hotel</option>
-              {hotels.map((hotel) => (
-                <option key={hotel.id} value={hotel.id}>
-                  {hotel.name} (#{hotel.id})
-                </option>
-              ))}
-            </select>
-          </label>
-          {Object.keys(emptyRoom)
-            .filter((field) => field !== "hotelId")
-            .map((field) => (
-              <label key={field}>
-                {labelFor(field)}
-                <input
-                  type={["capacity", "inventoryCount", "basePrice"].includes(field) ? "number" : "text"}
-                  value={roomForm[field]}
-                  onChange={(event) => setRoomForm({ ...roomForm, [field]: event.target.value })}
-                  required
-                />
-              </label>
-            ))}
-          <button className="btn btn-teal" disabled={createRoom.isPending}>
-            {createRoom.isPending ? "Adding..." : "Add room"}
-          </button>
+          <button>Create</button>
         </form>
-      </div>
 
-      <div className="dashboard-grid">
-        <div className="panel">
+        {/* Hotels */}
+        <div>
           <h2>Hotels</h2>
-          {hotels.length ? (
-            <div className="manager-list">
-              {hotels.map((hotel) => (
-                <article key={hotel.id} className="manager-row">
-                  <div>
-                    <strong>{hotel.name}</strong>
-                    <span>{hotel.city}, {hotel.country}</span>
-                  </div>
-                  <button
-                    className="btn btn-small btn-outline"
-                    disabled={deleteHotel.isPending}
-                    onClick={() => deleteHotel.mutate(hotel.id)}
-                  >
-                    Delete
-                  </button>
-                </article>
-              ))}
-            </div>
-          ) : (
-            <p className="muted">No hotels available yet.</p>
-          )}
+
+          {hotels.map((hotel) => (
+              <div key={hotel.id}>
+                <strong>{hotel.name}</strong>
+
+                {/* ✅ FIX #11 */}
+                <button
+                    onClick={() => {
+                      if (
+                          window.confirm(
+                              `Delete "${hotel.name}"? This cannot be undone.`
+                          )
+                      ) {
+                        deleteHotel.mutate(hotel.id);
+                      }
+                    }}
+                >
+                  Delete
+                </button>
+              </div>
+          ))}
         </div>
 
-        <div className="panel">
+        {/* Upcoming bookings */}
+        <div>
           <h2>Upcoming bookings</h2>
-          {hotels.length ? (
-            <label style={{ marginBottom: 12 }}>
-              <span>Hotel</span>
-              <select value={selectedHotelId} onChange={(event) => setSelectedHotelId(event.target.value)}>
-                <option value="">All my hotels</option>
-                {hotels.map((hotel) => (
-                  <option key={hotel.id} value={hotel.id}>
-                    {hotel.name} (#{hotel.id})
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
-          {upcoming.length ? (
-            <div className="manager-list">
-              {upcoming.map((booking) => (
-                <article key={booking.id} className="manager-row">
+
+          <select
+              value={selectedHotelId}
+              onChange={(e) => setSelectedHotelId(e.target.value)}
+          >
+            <option value="">All</option>
+            {hotels.map((h) => (
+                <option key={h.id} value={h.id}>
+                  {h.name}
+                </option>
+            ))}
+          </select>
+
+          {upcoming.map((b) => {
+            const hotel = hotels.find((h) => h.id === b.hotelId);
+
+            return (
+                <div key={b.id}>
+                  <strong>Booking #{b.id}</strong>
+                  <div>{hotel?.name}</div>
                   <div>
-                    <strong>Booking #{booking.id}</strong>
-                    <span>{formatDate(booking.startDate)} to {formatDate(booking.endDate)}</span>
+                    {formatDate(b.startDate)} → {formatDate(b.endDate)}
                   </div>
-                  <span className="status-pill">{money(booking.totalPrice)}</span>
-                </article>
-              ))}
-            </div>
-          ) : (
-            <p className="muted">No upcoming bookings.</p>
-          )}
+                  <div>{money(b.totalPrice)}</div>
+                </div>
+            );
+          })}
         </div>
-      </div>
-    </section>
+      </section>
   );
-}
-
-function submitForm(event, payload, mutation) {
-  event.preventDefault();
-  mutation.mutate(payload);
-}
-
-function normalizeHotel(payload) {
-  return {
-    ...payload,
-    managerId: Number(payload.managerId),
-  };
 }
 
 function normalizeRoom(payload) {
@@ -222,10 +201,6 @@ function normalizeRoom(payload) {
     capacity: Number(payload.capacity),
     inventoryCount: Number(payload.inventoryCount),
     basePrice: Number(payload.basePrice),
-    amenities: payload.amenities.split(",").map((item) => item.trim()).filter(Boolean),
+    amenities: payload.amenities.split(",").map((a) => a.trim()),
   };
-}
-
-function labelFor(field) {
-  return field.replace(/([A-Z])/g, " $1").replace(/^./, (letter) => letter.toUpperCase());
 }

@@ -1,190 +1,174 @@
 import { apiRequest } from "./client";
 
 export const bookingApi = {
-  login: (payload) =>
-    apiRequest("/auth/login", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }),
+    login: (payload) =>
+        apiRequest("/auth/login", {
+            method: "POST",
+            body: JSON.stringify(payload),
+        }),
 
-  register: (payload) =>
-    apiRequest("/auth/register", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }),
+    register: (payload) =>
+        apiRequest("/auth/register", {
+            method: "POST",
+            body: JSON.stringify(payload),
+        }),
 
-  logout: (refreshToken) =>
-    apiRequest("/auth/logout", {
-      method: "POST",
-      body: JSON.stringify({ refreshToken }),
-    }),
+    logout: (refreshToken) =>
+        apiRequest("/auth/logout", {
+            method: "POST",
+            body: JSON.stringify({ refreshToken }),
+        }),
 
-  listHotels: (params) => apiRequest(`/hotels?${toQuery(params)}`),
+    listHotels: (params) => apiRequest(`/hotels?${toQuery(params)}`),
 
-  getHotel: (id) => apiRequest(`/hotels/${id}`),
+    getMyHotels: () => apiRequest("/hotels/my"),
 
-  createHotel: (payload) =>
-    apiRequest("/hotels", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }),
+    getHotel: (id) => apiRequest(`/hotels/${id}`),
 
-  updateHotel: (id, payload) =>
-    apiRequest(`/hotels/${id}`, {
-      method: "PUT",
-      body: JSON.stringify(payload),
-    }),
+    createHotel: (payload) =>
+        apiRequest("/hotels", {
+            method: "POST",
+            body: JSON.stringify(payload),
+        }),
 
-  deleteHotel: (id) =>
-    apiRequest(`/hotels/${id}`, {
-      method: "DELETE",
-    }),
+    updateHotel: (id, payload) =>
+        apiRequest(`/hotels/${id}`, {
+            method: "PUT",
+            body: JSON.stringify(payload),
+        }),
 
-  getRoomTypes: (hotelId) => apiRequest(`/room-type/hotel/${hotelId}`),
+    deleteHotel: (id) =>
+        apiRequest(`/hotels/${id}`, {
+            method: "DELETE",
+        }),
 
-  getRoomType: (roomTypeId) => apiRequest(`/room-type/${roomTypeId}`),
+    getRoomTypes: (hotelId) => apiRequest(`/room-type/hotel/${hotelId}`),
 
-  createRoomType: (payload) =>
-    apiRequest("/room-type", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }),
+    getRoomType: (roomTypeId) => apiRequest(`/room-type/${roomTypeId}`),
 
-  updateRoomType: (id, payload) =>
-    apiRequest(`/room-type/${id}`, {
-      method: "PUT",
-      body: JSON.stringify(payload),
-    }),
+    createRoomType: (payload) =>
+        apiRequest("/room-type", {
+            method: "POST",
+            body: JSON.stringify(payload),
+        }),
 
-  deleteRoomType: (id) =>
-    apiRequest(`/room-type/${id}`, {
-      method: "DELETE",
-    }),
+    updateRoomType: (id, payload) =>
+        apiRequest(`/room-type/${id}`, {
+            method: "PUT",
+            body: JSON.stringify(payload),
+        }),
 
-  checkAvailability: (payload) =>
-    apiRequest("/availability/check", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }),
+    deleteRoomType: (id) =>
+        apiRequest(`/room-type/${id}`, {
+            method: "DELETE",
+        }),
 
-  createBooking: (payload) =>
-    apiRequest("/bookings", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }),
+    checkAvailability: (payload) =>
+        apiRequest("/availability/check", {
+            method: "POST",
+            body: JSON.stringify(payload),
+        }),
 
-  myBookings: () => apiRequest("/bookings/my"),
+    createBooking: (payload) =>
+        apiRequest("/bookings", {
+            method: "POST",
+            body: JSON.stringify(payload),
+        }),
 
-  upcomingBookings: (hotelId) =>
-    apiRequest(`/bookings/upcoming?${toQuery({ hotelId })}`),
+    myBookings: () => apiRequest("/bookings/my"),
 
-  cancelBooking: (id) =>
-    apiRequest(`/bookings/${id}/cancel`, {
-      method: "PUT",
-    }),
+    upcomingBookings: (hotelId) =>
+        hotelId
+            ? apiRequest(`/bookings/upcoming?hotelId=${hotelId}`)
+            : apiRequest("/bookings/upcoming"),
 
-  createPayment: (bookingId) =>
-    apiRequest("/payments", {
-      method: "POST",
-      body: JSON.stringify({ bookingId }),
-    }),
+    cancelBooking: (id) =>
+        apiRequest(`/bookings/${id}/cancel`, {
+            method: "PUT",
+        }),
 
-  processPayment: (paymentId, success = true) =>
-    apiRequest(`/payments/${paymentId}/process?${toQuery({ success: success ? "true" : "false" })}`, {
-      method: "POST",
-    }),
+    createPayment: (bookingId) =>
+        apiRequest("/payments", {
+            method: "POST",
+            body: JSON.stringify({ bookingId }),
+        }),
 
-  confirmBooking: (bookingId) =>
-    apiRequest(`/bookings/${bookingId}/confirm`, {
-      method: "PUT",
-    }),
+    processPayment: (paymentId, success = true) =>
+        apiRequest(
+            `/payments/${paymentId}/process?${toQuery({
+                success: success ? "true" : "false",
+            })}`,
+            {
+                method: "POST",
+            }
+        ),
 
-  wishlist: () => apiRequest("/wishlist"),
+    confirmBooking: (bookingId) =>
+        apiRequest(`/bookings/${bookingId}/confirm`, {
+            method: "PUT",
+        }),
 
-  addToWishlist: (payload) =>
-    apiRequest("/wishlist", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }),
+    managerDashboard: (managerId) =>
+        apiRequest(`/managers/${managerId}/dashboard`),
 
-  removeFromWishlist: ({ itemType, targetId }) =>
-    apiRequest(`/wishlist?${toQuery({ itemType, targetId })}`, {
-      method: "DELETE",
-    }),
+    hotelAnalytics: (hotelId) =>
+        apiRequest(`/hotels/${hotelId}/analytics`),
 
-  myAlerts: () => apiRequest("/alerts"),
+    wishlist: () => apiRequest("/wishlist"),
 
-  createAlert: (payload) =>
-    apiRequest("/alerts", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }),
+    addToWishlist: (payload) =>
+        apiRequest("/wishlist", {
+            method: "POST",
+            body: JSON.stringify(payload),
+        }),
 
-  activateAlert: (id) =>
-    apiRequest(`/alerts/${id}/activate`, {
-      method: "PATCH",
-    }),
+    removeFromWishlist: ({ itemType, targetId }) =>
+        apiRequest(`/wishlist?${toQuery({ itemType, targetId })}`, {
+            method: "DELETE",
+        }),
 
-  deactivateAlert: (id) =>
-    apiRequest(`/alerts/${id}/deactivate`, {
-      method: "PATCH",
-    }),
+    myAlerts: () => apiRequest("/alerts"),
 
-  notifications: () => apiRequest("/notifications"),
+    createAlert: (payload) =>
+        apiRequest("/alerts", {
+            method: "POST",
+            body: JSON.stringify(payload),
+        }),
 
-  markNotificationRead: (id) =>
-    apiRequest(`/notifications/${id}/read`, {
-      method: "PATCH",
-    }),
+    activateAlert: (id) =>
+        apiRequest(`/alerts/${id}/activate`, {
+            method: "PATCH",
+        }),
 
-  markAllNotificationsRead: () =>
-    apiRequest("/notifications/read-all", {
-      method: "PATCH",
-    }),
+    deactivateAlert: (id) =>
+        apiRequest(`/alerts/${id}/deactivate`, {
+            method: "PATCH",
+        }),
 
-  unreadNotificationCount: () => apiRequest("/notifications/unread-count"),
+    notifications: () => apiRequest("/notifications"),
 
-  adminRoles: () => apiRequest("/admin/roles"),
+    markNotificationRead: (id) =>
+        apiRequest(`/notifications/${id}/read`, {
+            method: "PATCH",
+        }),
 
-  adminPermissions: () => apiRequest("/admin/permissions"),
+    markAllNotificationsRead: () =>
+        apiRequest("/notifications/read-all", {
+            method: "PATCH",
+        }),
 
-  adminCreateRole: (payload) =>
-    apiRequest("/admin/roles", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }),
-
-  adminCreatePermission: (payload) =>
-    apiRequest("/admin/permissions", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }),
-
-  adminReplaceRolePermissions: (roleId, payload) =>
-    apiRequest(`/admin/roles/${roleId}/permissions`, {
-      method: "PUT",
-      body: JSON.stringify(payload),
-    }),
-
-  adminAssignRoleToUser: (userId, roleId) =>
-    apiRequest(`/admin/users/${userId}/roles/${roleId}`, {
-      method: "POST",
-    }),
-
-  adminRemoveRoleFromUser: (userId, roleId) =>
-    apiRequest(`/admin/users/${userId}/roles/${roleId}`, {
-      method: "DELETE",
-    }),
+    unreadNotificationCount: () =>
+        apiRequest("/notifications/unread-count"),
 };
 
 function toQuery(params = {}) {
-  const query = new URLSearchParams();
+    const query = new URLSearchParams();
 
-  Object.entries(params).forEach(([key, value]) => {
-    if (value !== undefined && value !== null && value !== "") {
-      query.set(key, value);
-    }
-  });
+    Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && value !== "") {
+            query.set(key, value);
+        }
+    });
 
-  return query.toString();
+    return query.toString();
 }
