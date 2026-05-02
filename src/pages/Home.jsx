@@ -3,9 +3,17 @@ import { useTranslation } from "react-i18next";
 import SearchPanel from "../components/SearchPanel";
 import { useAuth } from "../auth/AuthContext";
 
+const WHY_CARDS = [
+  { icon: "⚡", titleKey: "home.whyCardFastTitle", bodyKey: "home.whyCardFastBody" },
+  { icon: "₪", titleKey: "home.whyCardClearTitle", bodyKey: "home.whyCardClearBody" },
+  { icon: "✨", titleKey: "home.whyCardSmartTitle", bodyKey: "home.whyCardSmartBody" },
+  { icon: "✓", titleKey: "home.whyCardTrustedTitle", bodyKey: "home.whyCardTrustedBody" },
+];
+
 export default function Home() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const auth = useAuth();
+  const isRtl = i18n.language?.startsWith("ar");
 
   return (
     <>
@@ -21,7 +29,7 @@ export default function Home() {
                   {t("home.startSearching")}
                 </Link>
               ) : (
-                <Link className="btn btn-teal" to="/login">
+                <Link className="btn btn-primary" to="/login">
                   {t("home.login")}
                 </Link>
               )}
@@ -57,19 +65,33 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="promo-band">
-        <div className="container promo-grid">
-          <div>
+      <section className="why-section" dir={isRtl ? "rtl" : "ltr"}>
+        <div className="container why-grid">
+          <div className="why-copy">
             <h2>{t("home.promoTitle")}</h2>
             <p>{t("home.promoBody")}</p>
+            <div className="why-stats">
+              <div className="why-stat">
+                <strong>{t("home.whyStat247")}</strong>
+                <span>{t("home.whyStat247Sub")}</span>
+              </div>
+              <div className="why-stat">
+                <strong>{t("home.whyStat50")}</strong>
+                <span>{t("home.whyStat50Sub")}</span>
+              </div>
+            </div>
           </div>
-          <div className="stat-card">
-            <strong>{t("home.statFast")}</strong>
-            <span>{t("home.statFastSub")}</span>
-          </div>
-          <div className="stat-card">
-            <strong>{t("home.statSmart")}</strong>
-            <span>{t("home.statSmartSub")}</span>
+
+          <div className="why-cards">
+            {WHY_CARDS.map((card) => (
+              <div className="why-card" key={card.titleKey}>
+                <div className="why-icon" aria-hidden>
+                  {card.icon}
+                </div>
+                <h3>{t(card.titleKey)}</h3>
+                <p>{t(card.bodyKey)}</p>
+              </div>
+            ))}
           </div>
         </div>
       </section>

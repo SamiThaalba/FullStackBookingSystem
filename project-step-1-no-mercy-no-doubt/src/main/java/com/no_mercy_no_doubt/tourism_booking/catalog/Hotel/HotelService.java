@@ -101,6 +101,12 @@ public class HotelService {
         if (request.country() != null) {
             hotel.setCountry(request.country().trim());
         }
+        if (request.latitude() != null) {
+            hotel.setLatitude(request.latitude());
+        }
+        if (request.longitude() != null) {
+            hotel.setLongitude(request.longitude());
+        }
         if (request.phone() != null) {
             hotel.setPhone(request.phone().trim());
         }

@@ -1,17 +1,17 @@
 import { useQuery } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { lazy, Suspense, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { bookingApi } from "../api/bookingApi";
 import { useAuth } from "../auth/AuthContext";
 import Alert from "../components/Alert";
-import HotelCard from "../components/HotelCard";
 import SearchPanel from "../components/SearchPanel";
 
-/** Typical seed country for this project; merged with values returned from `/api/hotels`. */
+const HotelsGoogleMap = lazy(() => import("../components/HotelsGoogleMap"));
+
 const DEFAULT_COUNTRY_FILTERS = ["Palestine"];
 
-export default function Hotels() {
+export default function HotelsMap() {
   const { t } = useTranslation();
   const auth = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -25,7 +25,7 @@ export default function Hotels() {
   const filters = useMemo(
     () => ({
       page,
-      size: 6,
+      size: 50,
       city: searchParams.get("city") || "",
       country,
       name: searchParams.get("name") || "",
@@ -34,13 +34,12 @@ export default function Hotels() {
   );
 
   const hotelsQuery = useQuery({
-    queryKey: ["hotels", filters],
+    queryKey: ["hotels-map", filters],
     queryFn: () => bookingApi.listHotels(filters),
   });
 
   const hotels = hotelsQuery.data?.content || [];
   const queryString = searchParams.toString();
-  const mapHref = queryString ? `/hotels/map?${queryString}` : "/hotels/map";
 
   const cityOptions = useMemo(() => {
     const unique = new Set();
@@ -74,10 +73,19 @@ export default function Hotels() {
     setSearchParams(next);
   }
 
+  const listHref = queryString ? `/hotels?${queryString}` : "/hotels";
+
   return (
-    <section className="container results-page">
+    <section className="container results-page hotels-map-page">
+      <div className="section-heading map-page-heading">
+        <p className="eyebrow">{t("hotels.mapPageEyebrow")}</p>
+        <h1>{t("hotels.mapPageTitle")}</h1>
+        <p className="muted">{t("hotels.mapPageHint")}</p>
+      </div>
+
       <SearchPanel
         compact
+        navigateTo="/hotels/map"
         initialValues={{
           city: searchParams.get("city") || "",
           from: searchParams.get("from") || undefined,
@@ -107,8 +115,8 @@ export default function Hotels() {
             </option>
           ))}
         </select>
-        <Link className="filter-button" to={mapHref}>
-          {t("hotels.mapView")}
+        <Link className="filter-button" to={listHref}>
+          {t("hotels.listView")}
         </Link>
       </div>
 
@@ -117,19 +125,26 @@ export default function Hotels() {
       {hotelsQuery.isLoading ? (
         <div className="empty-state">{t("hotels.loading")}</div>
       ) : hotels.length ? (
-        <div className="hotel-list">
-          {hotels.map((hotel) => (
-            <HotelCard key={hotel.id} hotel={hotel} />
-          ))}
-        </div>
+        <Suspense
+          fallback={
+            <div className="map-panel map-panel--placeholder">
+              <p className="muted">{t("hotels.mapsLoading")}</p>
+            </div>
+          }
+        >
+          <HotelsGoogleMap hotels={hotels} variant="page" />
+        </Suspense>
       ) : (
         <div className="empty-state">
           <h2>{t("hotels.noResultsTitle")}</h2>
           <p>{t("hotels.noResultsBody")}</p>
+          <Link className="btn btn-teal" to="/hotels">
+            {t("hotels.goToList")}
+          </Link>
         </div>
       )}
 
-      {hotelsQuery.data && (
+      {hotelsQuery.data && hotelsQuery.data.totalPages > 1 ? (
         <div className="pagination">
           <button disabled={hotelsQuery.data.first} onClick={() => changePage(page - 1)}>
             {t("hotels.previous")}
@@ -144,7 +159,7 @@ export default function Hotels() {
             {t("hotels.next")}
           </button>
         </div>
-      )}
+      ) : null}
     </section>
   );
 }

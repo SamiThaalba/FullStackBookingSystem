@@ -19,6 +19,10 @@ public record HotelPatchRequest(
 
         String country,
 
+        Double latitude,
+
+        Double longitude,
+
         String phone,
 
         @Email(message = "Email format is invalid.")

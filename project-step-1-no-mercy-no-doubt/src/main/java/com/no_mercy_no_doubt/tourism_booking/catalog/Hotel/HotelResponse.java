@@ -26,6 +26,8 @@ public class HotelResponse {
     private String email;
     private Long managerId;
     private String imageUrl;
+    private Double latitude;
+    private Double longitude;
 
     @Schema(description = "Room types (included in details only)")
     private List<RoomTypeResponse> roomTypes;

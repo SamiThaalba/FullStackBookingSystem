@@ -5,11 +5,13 @@ import com.no_mercy_no_doubt.tourism_booking.catalog.Booking.BookingRepository;
 import com.no_mercy_no_doubt.tourism_booking.catalog.RoomType.RoomType;
 import com.no_mercy_no_doubt.tourism_booking.catalog.RoomType.RoomTypeRepository;
 import com.no_mercy_no_doubt.tourism_booking.common.utils.CurrentUserProvider;
+import com.no_mercy_no_doubt.tourism_booking.notification.service.AlertEmailNotifier;
 import com.no_mercy_no_doubt.tourism_booking.notification.service.NotificationService;
 import com.no_mercy_no_doubt.tourism_booking.wishlist.dto.AlertResponse;
 import com.no_mercy_no_doubt.tourism_booking.wishlist.dto.CreateAlertRequest;
 import com.no_mercy_no_doubt.tourism_booking.wishlist.entity.PriceAvailabilityAlert;
 import com.no_mercy_no_doubt.tourism_booking.wishlist.enums.AlertType;
+import com.no_mercy_no_doubt.tourism_booking.wishlist.messaging.WishlistTriggeredAlertVariants;
 import com.no_mercy_no_doubt.tourism_booking.wishlist.repository.PriceAvailabilityAlertRepository;
 import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
@@ -34,6 +36,7 @@ public class AlertService {
     private final BookingRepository bookingRepository;
     private final CurrentUserProvider currentUserProvider;
     private final NotificationService notificationService;
+    private final AlertEmailNotifier alertEmailNotifier;
 
     @Qualifier("wishlistRequiresNewTransactionTemplate")
     private final TransactionTemplate wishlistRequiresNewTransactionTemplate;
@@ -221,23 +224,22 @@ public class AlertService {
                 ? alert.getRoomType().getHotel().getName()
                 : "Unknown hotel";
 
-        String title;
-        String message;
+        WishlistTriggeredAlertVariants variants =
+                alert.getAlertType() == AlertType.PRICE_BELOW
+                        ? WishlistTriggeredAlertVariants.forPriceBelow(
+                                alert.getRoomType().getName(), hotelName, alert.getTargetPrice())
+                        : WishlistTriggeredAlertVariants.forAvailability(
+                                alert.getRoomType().getName(),
+                                hotelName,
+                                alert.getCheckIn(),
+                                alert.getCheckOut(),
+                                alert.getGuestCount() != null ? alert.getGuestCount() : 1);
 
-        if (alert.getAlertType() == AlertType.PRICE_BELOW) {
-            title = "Price Alert Triggered";
-            message = "The room type \"" + alert.getRoomType().getName() +
-                    "\" at hotel \"" + hotelName +
-                    "\" has reached your target price or lower.";
-        } else {
-            title = "Availability Alert Triggered";
-            message = "The room type \"" + alert.getRoomType().getName() +
-                    "\" at hotel \"" + hotelName +
-                    "\" is now available for " + (alert.getGuestCount() != null ? alert.getGuestCount() : 1) +
-                    " guest(s) from " + alert.getCheckIn() + " to " + alert.getCheckOut() + ".";
-        }
-
-        notificationService.create(alert.getUser(), title, message);
+        WishlistTriggeredAlertVariants.NotificationPair inApp =
+                variants.notificationFor(alert.getUser());
+        notificationService.create(alert.getUser(), inApp.title(), inApp.message());
+        alertEmailNotifier.sendTriggeredAlert(
+                alert.getUser(), variants.emailSubject(), variants.emailBody());
     }
 
     private AlertResponse toResponse(PriceAvailabilityAlert alert) {

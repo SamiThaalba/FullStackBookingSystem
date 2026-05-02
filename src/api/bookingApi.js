@@ -144,6 +144,13 @@ export const bookingApi = {
 
   unreadNotificationCount: () => apiRequest("/notifications/unread-count"),
 
+  /** Persists UI language (en/ar) so server-triggered alerts use the matching locale for in-app notifications. */
+  syncUiLanguage: (language) =>
+    apiRequest("/me/ui-language", {
+      method: "PATCH",
+      body: JSON.stringify({ language }),
+    }),
+
   adminRoles: () => apiRequest("/admin/roles"),
 
   adminPermissions: () => apiRequest("/admin/permissions"),

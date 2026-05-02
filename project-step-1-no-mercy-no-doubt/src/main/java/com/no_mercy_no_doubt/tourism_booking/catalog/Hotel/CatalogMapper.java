@@ -19,6 +19,8 @@ public class CatalogMapper {
                 .address(req.getAddress())
                 .city(req.getCity())
                 .country(req.getCountry())
+                .latitude(req.getLatitude())
+                .longitude(req.getLongitude())
                 .phone(req.getPhone())
                 .email(req.getEmail())
                 .managerId(req.getManagerId())
@@ -32,6 +34,8 @@ public class CatalogMapper {
         entity.setAddress(req.getAddress());
         entity.setCity(req.getCity());
         entity.setCountry(req.getCountry());
+        entity.setLatitude(req.getLatitude());
+        entity.setLongitude(req.getLongitude());
         entity.setPhone(req.getPhone());
         entity.setEmail(req.getEmail());
         entity.setManagerId(req.getManagerId());
@@ -48,7 +52,9 @@ public class CatalogMapper {
                 .country(hotel.getCountry())
                 .phone(hotel.getPhone())
                 .email(hotel.getEmail())
-                .managerId(hotel.getManagerId());
+                .managerId(hotel.getManagerId())
+                .latitude(hotel.getLatitude())
+                .longitude(hotel.getLongitude());
 
         if (includeRoomTypes && hotel.getRoomTypes() != null) {
             b.roomTypes(hotel.getRoomTypes()

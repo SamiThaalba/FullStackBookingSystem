@@ -32,6 +32,12 @@ public class Hotel {
 
     private String country;
 
+    /** Decimal degrees WGS84; nullable for legacy rows until managers set coordinates. */
+    private Double latitude;
+
+    /** Decimal degrees WGS84 */
+    private Double longitude;
+
     private String phone;
 
     private String email;

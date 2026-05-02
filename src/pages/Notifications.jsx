@@ -3,14 +3,6 @@ import { bookingApi } from "../api/bookingApi";
 import Alert from "../components/Alert";
 import { formatDate } from "../utils/format";
 
-function iconFor(notification) {
-  const text = `${notification?.message || ""} ${notification?.title || ""}`.toLowerCase();
-  if (text.includes("price")) return "₪";
-  if (text.includes("available")) return "✓";
-  if (text.includes("booking")) return "B";
-  return "!";
-}
-
 export default function Notifications() {
   const queryClient = useQueryClient();
 
@@ -32,14 +24,6 @@ export default function Notifications() {
     },
   });
 
-  const markAllReadMutation = useMutation({
-    mutationFn: bookingApi.markAllNotificationsRead,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["notifications"] });
-      queryClient.invalidateQueries({ queryKey: ["notifications-unread-count"] });
-    },
-  });
-
   const notifications = notificationsQuery.data || [];
   const unreadCount = unreadCountQuery.data?.unreadCount ?? 0;
 
@@ -53,33 +37,55 @@ export default function Notifications() {
       <Alert type="error">
         {notificationsQuery.error?.message ||
           unreadCountQuery.error?.message ||
-          markReadMutation.error?.message ||
-          markAllReadMutation.error?.message}
+          markReadMutation.error?.message}
       </Alert>
 
-      <div className="hero-actions" style={{ justifyContent: "space-between" }}>
-        <span className="muted">Unread: {unreadCount}</span>
-        <button className="btn btn-small btn-outline" disabled={markAllReadMutation.isPending} onClick={() => markAllReadMutation.mutate()}>
-          {markAllReadMutation.isPending ? "Marking..." : "Mark all as read"}
-        </button>
-      </div>
+      <p className="muted" style={{ marginBottom: "16px" }}>
+        Unread: {unreadCount}
+        {unreadCount > 0 ? <span> · Select a notification to mark it read</span> : null}
+      </p>
 
       {notificationsQuery.isLoading ? (
         <div className="empty-state">Loading notifications...</div>
       ) : notifications.length ? (
         <div className="manager-list">
-          {notifications.map((n) => (
-            <div key={n.id} className="notif-row">
-              {!n.read ? <span className="notif-dot" aria-label="Unread" /> : <span />}
-              <div>
-                <strong>{n.title || "Notification"}</strong>
-                <p style={{ margin: "6px 0 0" }}>{n.message || <span className="muted">—</span>}</p>
-                <p className="muted" style={{ margin: "6px 0 0" }}>
-                  {n.createdAt ? formatDate(n.createdAt) : "—"}
-                </p>
-              </div>
-            </div>
-          ))}
+          {notifications.map((n) => {
+            const markingThis =
+              markReadMutation.isPending && markReadMutation.variables === n.id;
+            const inner = (
+              <>
+                {!n.read ? <span className="notif-dot" aria-hidden /> : <span aria-hidden />}
+                <div className="notif-row__body">
+                  <strong dir="auto">{n.title || "Notification"}</strong>
+                  <p style={{ margin: "6px 0 0", whiteSpace: "pre-line" }} dir="auto">
+                    {n.message || <span className="muted">—</span>}
+                  </p>
+                  <p className="muted" style={{ margin: "6px 0 0" }}>
+                    {n.createdAt ? formatDate(n.createdAt) : "—"}
+                  </p>
+                </div>
+              </>
+            );
+            if (n.read) {
+              return (
+                <div key={n.id} className="notif-row notif-row--read">
+                  {inner}
+                </div>
+              );
+            }
+            return (
+              <button
+                key={n.id}
+                type="button"
+                className="notif-row notif-row--btn"
+                onClick={() => markReadMutation.mutate(n.id)}
+                disabled={markingThis}
+                aria-label="Mark notification as read"
+              >
+                {inner}
+              </button>
+            );
+          })}
         </div>
       ) : (
         <div className="empty-state">

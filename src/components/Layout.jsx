@@ -1,13 +1,25 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../auth/AuthContext";
+import { bookingApi } from "../api/bookingApi";
 import I18nHtmlAttributes from "./I18nHtmlAttributes";
 import LanguageSwitcher from "./LanguageSwitcher";
+import ThemeToggle from "./ThemeToggle";
 
 export default function Layout() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const auth = useAuth();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!auth.isAuthenticated || !i18n.isInitialized) return;
+    const code =
+      typeof i18n.language === "string"
+        ? i18n.language.split("-")[0]
+        : "en";
+    bookingApi.syncUiLanguage(code || "en").catch(() => {});
+  }, [auth.isAuthenticated, i18n.isInitialized, i18n.language]);
 
   async function handleLogout() {
     await auth.signOut();
@@ -32,6 +44,7 @@ export default function Layout() {
           </div>
 
           <div className="nav-actions">
+            <ThemeToggle />
             <LanguageSwitcher />
             {auth.isAuthenticated ? (
               <>
@@ -80,7 +93,7 @@ export default function Layout() {
           </div>
           <div>
             <h3>{t("layout.projectTeam")}</h3>
-            <p>{t("layout.teamTagline")}</p>
+            <p>Malik Alhurani, Sami Thalbah, Nicola Rabee</p>
           </div>
         </div>
       </footer>

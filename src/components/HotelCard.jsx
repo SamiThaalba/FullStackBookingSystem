@@ -1,19 +1,14 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
-import { bookingApi } from "../api/bookingApi";
 import { useAuth } from "../auth/AuthContext";
 import { compactAddress } from "../utils/format";
+import { useHotelWishlistToggle } from "../hooks/useHotelWishlistToggle";
 
 export default function HotelCard({ hotel }) {
   const { t } = useTranslation();
   const auth = useAuth();
-  const queryClient = useQueryClient();
   const canSave = auth.isAuthenticated && auth.isCustomer;
-  const saveMutation = useMutation({
-    mutationFn: () => bookingApi.addToWishlist({ itemType: "HOTEL", targetId: hotel.id }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["wishlist"] }),
-  });
+  const { isInWishlist, toggleMutation } = useHotelWishlistToggle(hotel, canSave);
 
   return (
     <article className="hotel-card">
@@ -41,11 +36,11 @@ export default function HotelCard({ hotel }) {
           </Link>
           {canSave ? (
             <button
+              type="button"
               className="btn btn-small btn-outline"
-              disabled={saveMutation.isPending}
-              onClick={() => saveMutation.mutate()}
+              onClick={() => toggleMutation.mutate({ add: !isInWishlist })}
             >
-              {saveMutation.isPending ? t("hotelCard.saving") : t("hotelCard.save")}
+              {isInWishlist ? t("hotelCard.removeFromFav") : t("hotelCard.addToFav")}
             </button>
           ) : null}
         </div>

@@ -39,4 +39,9 @@ public class AppUser {
 
     @Column(nullable = false)
     private boolean isBlocked;
+
+    /** UI locale for alerts & notifications {@code en} or {@code ar}; synced from the SPA language. */
+    @Builder.Default
+    @Column(name = "preferred_ui_language", length = 8)
+    private String preferredUiLanguage = "en";
 }

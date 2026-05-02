@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { bookingApi } from "../api/bookingApi";
 import { money } from "../utils/format";
+import { useTranslation } from "react-i18next";
 
 export default function RoomTypeCard({ roomType, onRemove }) {
   const queryClient = useQueryClient();
@@ -12,6 +13,7 @@ export default function RoomTypeCard({ roomType, onRemove }) {
       onRemove?.();
     },
   });
+  const { t } = useTranslation();
 
   return (
     <article className="room-card" style={{ alignItems: "center" }}>
@@ -27,15 +29,14 @@ export default function RoomTypeCard({ roomType, onRemove }) {
         </div>
       </div>
       <div className="room-price">
-        <strong>{money(roomType.basePrice)}</strong>
-        <span>per night</span>
+        <strong>{money(roomType.basePrice)} {t("hotelDetail.perNight")}</strong>
         {roomType.hotelId ? (
           <Link className="btn btn-small btn-outline" to={`/hotels/${roomType.hotelId}`}>
-            View hotel
+            {t("hotels.viewHotel")}
           </Link>
         ) : null}
         <button className="btn btn-small btn-outline" disabled={removeMutation.isPending} onClick={() => removeMutation.mutate()}>
-          {removeMutation.isPending ? "Removing..." : "Remove"}
+          {removeMutation.isPending ? "Removing..." : t("hotelCard.removeFromFav")}
         </button>
       </div>
     </article>

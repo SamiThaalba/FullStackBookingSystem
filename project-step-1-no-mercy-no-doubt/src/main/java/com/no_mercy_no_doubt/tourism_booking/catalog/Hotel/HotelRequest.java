@@ -21,6 +21,12 @@ public class HotelRequest {
 
     private String city;
     private String country;
+
+    /** Optional map pin (decimal degrees). */
+    private Double latitude;
+    /** Optional map pin (decimal degrees). */
+    private Double longitude;
+
     private String phone;
     private String email;
 

@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { bookingApi } from "../api/bookingApi";
 import { useAuth } from "../auth/AuthContext";
@@ -7,8 +8,14 @@ import { storeBookingIntent } from "../auth/bookingIntent";
 import Alert from "../components/Alert";
 import { nightsBetween, todayIso, tomorrowIso } from "../utils/dates";
 import { compactAddress, money } from "../utils/format";
+import { hasValidHotelLatLng } from "../utils/geo";
+import { useHotelWishlistToggle } from "../hooks/useHotelWishlistToggle";
+import RoomWishlistButton from "../components/RoomWishlistButton";
+
+const HotelsGoogleMap = lazy(() => import("../components/HotelsGoogleMap"));
 
 export default function HotelDetails() {
+  const { t } = useTranslation();
   const { hotelId } = useParams();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -59,11 +66,6 @@ export default function HotelDetails() {
     },
   });
 
-  const saveRoomMutation = useMutation({
-    mutationFn: (roomTypeId) => bookingApi.addToWishlist({ itemType: "ROOM_TYPE", targetId: roomTypeId }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["wishlist"] }),
-  });
-
   const bookingMutation = useMutation({
     mutationFn: () =>
       bookingApi.createBooking({
@@ -109,6 +111,15 @@ export default function HotelDetails() {
   const [alertDraft, setAlertDraft] = useState({ alertType: "PRICE_BELOW", targetPrice: "" });
 
   const hotel = hotelQuery.data;
+  const wishlistHotelEnabled =
+    auth.isAuthenticated && auth.isCustomer && Boolean(hotel?.id);
+  const wishlistHotel =
+    hotel ?? { id: undefined, name: "", city: null, imageUrl: null };
+  const { isInWishlist, toggleMutation } = useHotelWishlistToggle(
+    wishlistHotel,
+    wishlistHotelEnabled,
+  );
+
   const rooms = roomQuery.data || hotel?.roomTypes || [];
   const nights = nightsBetween(dates.checkIn, dates.checkOut);
 
@@ -126,7 +137,9 @@ export default function HotelDetails() {
     }));
   }, [rooms, selectedRoom]);
 
-  if (hotelQuery.isLoading) return <div className="container empty-state">Loading hotel...</div>;
+  if (hotelQuery.isLoading) {
+    return <div className="container empty-state">{t("hotelDetail.loadingHotel")}</div>;
+  }
 
   return (
     <section className="container detail-page">
@@ -138,16 +151,27 @@ export default function HotelDetails() {
               <p className="eyebrow">{hotel.city}, {hotel.country}</p>
               <h1>{hotel.name}</h1>
               <p>{compactAddress(hotel)}</p>
-              <p className="muted">{hotel.description || "Comfortable rooms in a convenient city location."}</p>
+              <p className="muted">{hotel.description || t("hotelDetail.defaultDescription")}</p>
+              {wishlistHotelEnabled ? (
+                <div className="detail-fav-row">
+                  <button
+                    type="button"
+                    className="btn btn-outline"
+                    onClick={() => toggleMutation.mutate({ add: !isInWishlist })}
+                  >
+                    {isInWishlist ? t("hotelCard.removeFromFav") : t("hotelCard.addToFav")}
+                  </button>
+                </div>
+              ) : null}
             </div>
             <div className="gallery-card">
-              {hotel.imageUrl ? <img src={hotel.imageUrl} alt={hotel.name} /> : <span>Hotel gallery</span>}
+              {hotel.imageUrl ? <img src={hotel.imageUrl} alt={hotel.name} /> : <span>{t("hotelDetail.galleryPlaceholder")}</span>}
             </div>
           </div>
 
           <div className="booking-panel">
             <label>
-              Check in
+              {t("hotelDetail.checkIn")}
               <input
                 type="date"
                 value={dates.checkIn}
@@ -155,7 +179,7 @@ export default function HotelDetails() {
               />
             </label>
             <label>
-              Check out
+              {t("hotelDetail.checkOut")}
               <input
                 type="date"
                 value={dates.checkOut}
@@ -163,7 +187,7 @@ export default function HotelDetails() {
               />
             </label>
             <label>
-              Guests
+              {t("hotelDetail.guests")}
               <input
                 type="number"
                 min="1"
@@ -171,52 +195,68 @@ export default function HotelDetails() {
                 onChange={(event) => setDates({ ...dates, guests: event.target.value })}
               />
             </label>
-            <strong>{nights} night stay</strong>
+            <strong>{t("hotelDetail.nightStay", { count: nights })}</strong>
+          </div>
+
+          <div className="detail-map-section">
+            <h2>{t("hotelDetail.locationOnMap")}</h2>
+            {hasValidHotelLatLng(hotel.latitude, hotel.longitude) ? (
+              <Suspense
+                fallback={
+                  <div className="map-panel map-panel--placeholder">
+                    <p className="muted">{t("hotels.mapsLoading")}</p>
+                  </div>
+                }
+              >
+                <HotelsGoogleMap hotels={[hotel]} variant="detail" />
+              </Suspense>
+            ) : (
+              <p className="muted detail-map-muted">{t("hotelDetail.mapNotAvailable")}</p>
+            )}
           </div>
 
           <div className="split-grid">
             <div>
-              <h2>Room types</h2>
+              <h2>{t("hotelDetail.roomTypesHeading")}</h2>
               <Alert type="error">{quoteMutation.error?.message || bookingMutation.error?.message}</Alert>
               <div className="room-list">
                 {rooms.map((room) => (
                   <article className="room-card" key={room.id}>
                     <div>
                       <h3>{room.name}</h3>
-                      <p>{room.description || "Flexible room for your trip."}</p>
+                      <p>{room.description || t("hotelDetail.defaultRoomDescription")}</p>
                       <div className="amenity-row">
-                        <span>Sleeps {room.capacity}</span>
-                        <span>{room.inventoryCount} rooms</span>
+                        <span>{t("hotelDetail.sleepsCount", { count: room.capacity })}</span>
+                        <span>{t("hotelDetail.inventoryRooms", { count: room.inventoryCount })}</span>
                         {(room.amenities || []).slice(0, 3).map((amenity) => (
                           <span key={amenity}>{amenity}</span>
                         ))}
                       </div>
                     </div>
                     <div className="room-price">
-                      <strong>{money(room.basePrice)}</strong>
-                      <span>per night</span>
+
+                      <strong>{money(room.basePrice)} {t("hotelDetail.perNight")}</strong>
                       <button className="btn btn-teal" onClick={() => quoteMutation.mutate(room)}>
-                        Check availability
+                        {t("hotelDetail.checkAvailability")}
                       </button>
                       {auth.isAuthenticated ? (
-                        <button
-                          className="btn btn-small btn-outline"
-                          disabled={saveRoomMutation.isPending}
-                          onClick={() => saveRoomMutation.mutate(room.id)}
-                        >
-                          {saveRoomMutation.isPending ? "Saving..." : "Save"}
-                        </button>
-                      ) : null}
-                      {auth.isAuthenticated ? (
-                        <button
-                          className="btn btn-small btn-outline"
-                          onClick={() => {
-                            setAlertOpenFor(room.id);
-                            setAlertDraft({ alertType: "PRICE_BELOW", targetPrice: "" });
-                          }}
-                        >
-                          Add alert
-                        </button>
+                        <div style={{ display: "flex", gap: "8px", marginTop: "8px", flexWrap: "wrap" }}>
+                          <RoomWishlistButton
+                            room={room}
+                            hotel={hotel}
+                            enabled={auth.isAuthenticated && auth.isCustomer}
+                          />
+                          <button
+                            className="btn btn-small btn-outline"
+                            type="button"
+                            onClick={() => {
+                              setAlertOpenFor(room.id);
+                              setAlertDraft({ alertType: "PRICE_BELOW", targetPrice: "" });
+                            }}
+                          >
+                            {t("hotelDetail.addAlert")}
+                          </button>
+                        </div>
                       ) : null}
                     </div>
                   </article>
@@ -225,30 +265,30 @@ export default function HotelDetails() {
             </div>
 
             <aside className="quote-card">
-              <h2>Your quote</h2>
+              <h2>{t("hotelDetail.yourQuote")}</h2>
               {quote ? (
                 <>
                   <p>{quote.message}</p>
                   <div className="price-line">
-                    <span>Room</span>
+                    <span>{t("hotelDetail.labelRoom")}</span>
                     <strong>{selectedRoom?.name}</strong>
                   </div>
                   <div className="price-line">
-                    <span>Nights</span>
+                    <span>{t("hotelDetail.labelNights")}</span>
                     <strong>{nights}</strong>
                   </div>
                   <div className="price-line">
-                    <span>Base total</span>
+                    <span>{t("hotelDetail.labelBaseTotal")}</span>
                     <strong>{money((selectedRoom?.basePrice || 0) * nights)}</strong>
                   </div>
                   {typeof quote.totalPrice === "number" ? (
                     <div className="price-line">
-                      <span>Dynamic pricing</span>
+                      <span>{t("hotelDetail.labelDynamicPricing")}</span>
                       <strong>{money(quote.totalPrice - (selectedRoom?.basePrice || 0) * nights)}</strong>
                     </div>
                   ) : null}
                   <div className="price-line">
-                    <span>Total</span>
+                    <span>{t("hotelDetail.labelTotal")}</span>
                     <strong>{money(quote.totalPrice)}</strong>
                   </div>
                   <button
@@ -272,25 +312,25 @@ export default function HotelDetails() {
                       setPaymentOpen(true);
                     }}
                   >
-                    {bookingMutation.isPending ? "Booking..." : "Create booking"}
+                    {bookingMutation.isPending ? t("hotelDetail.booking") : t("hotelDetail.createBooking")}
                   </button>
                 </>
               ) : (
-                <p className="muted">Choose a room to see availability and price breakdown.</p>
+                <p className="muted">{t("hotelDetail.quoteHint")}</p>
               )}
             </aside>
           </div>
 
           {paymentOpen ? (
             <div className="modal-backdrop" role="presentation" onClick={() => !pendingBook && setPaymentOpen(false)}>
-              <div className="modal" role="dialog" aria-label="Mock payment" onClick={(e) => e.stopPropagation()}>
+              <div className="modal" role="dialog" aria-label={t("hotelDetail.mockPaymentAria")} onClick={(e) => e.stopPropagation()}>
                 <div className="modal-head">
-                  <h2>Payment details (mock)</h2>
+                  <h2>{t("hotelDetail.mockPaymentTitle")}</h2>
                   <button className="btn btn-small btn-outline" type="button" disabled={pendingBook} onClick={() => setPaymentOpen(false)}>
-                    Close
+                    {t("hotelDetail.close")}
                   </button>
                 </div>
-                <p className="muted">This is a mock payment. Your data is not stored.</p>
+                <p className="muted">{t("hotelDetail.mockPaymentDisclaimer")}</p>
                 <form
                   className="stack-form"
                   onSubmit={(e) => {
@@ -300,21 +340,36 @@ export default function HotelDetails() {
                   }}
                 >
                   <label>
-                    Full name
+                    {t("hotelDetail.fullName")}
                     <input value={paymentDraft.fullName} onChange={(e) => setPaymentDraft((c) => ({ ...c, fullName: e.target.value }))} required />
                   </label>
                   <label>
-                    Card number
-                    <input value={paymentDraft.cardNumber} onChange={(e) => setPaymentDraft((c) => ({ ...c, cardNumber: e.target.value }))} placeholder="4242 4242 4242 4242" required />
+                    {t("hotelDetail.cardNumber")}
+                    <input
+                      value={paymentDraft.cardNumber}
+                      onChange={(e) => setPaymentDraft((c) => ({ ...c, cardNumber: e.target.value }))}
+                      placeholder={t("hotelDetail.cardPlaceholder")}
+                      required
+                    />
                   </label>
                   <div className="modal-grid">
                     <label>
-                      Expiry
-                      <input value={paymentDraft.expiry} onChange={(e) => setPaymentDraft((c) => ({ ...c, expiry: e.target.value }))} placeholder="12/30" required />
+                      {t("hotelDetail.expiry")}
+                      <input
+                        value={paymentDraft.expiry}
+                        onChange={(e) => setPaymentDraft((c) => ({ ...c, expiry: e.target.value }))}
+                        placeholder={t("hotelDetail.expiryPlaceholder")}
+                        required
+                      />
                     </label>
                     <label>
-                      CVV
-                      <input value={paymentDraft.cvv} onChange={(e) => setPaymentDraft((c) => ({ ...c, cvv: e.target.value }))} placeholder="123" required />
+                      {t("hotelDetail.cvv")}
+                      <input
+                        value={paymentDraft.cvv}
+                        onChange={(e) => setPaymentDraft((c) => ({ ...c, cvv: e.target.value }))}
+                        placeholder={t("hotelDetail.cvvPlaceholder")}
+                        required
+                      />
                     </label>
                   </div>
                   <div className="hero-actions" style={{ justifyContent: "space-between" }}>
@@ -324,17 +379,17 @@ export default function HotelDetails() {
                       disabled={pendingBook}
                       onClick={() =>
                         setPaymentDraft({
-                          fullName: auth.user?.username || "QuickReserve Guest",
+                          fullName: auth.user?.username || t("hotelDetail.guestDisplayName"),
                           cardNumber: "4242 4242 4242 4242",
                           expiry: "12/30",
                           cvv: "123",
                         })
                       }
                     >
-                      Autofill
+                      {t("hotelDetail.autofill")}
                     </button>
                     <button className="btn btn-primary" disabled={pendingBook}>
-                      {pendingBook ? "Processing..." : "Pay & book"}
+                      {pendingBook ? t("hotelDetail.processing") : t("hotelDetail.payAndBook")}
                     </button>
                   </div>
                 </form>
@@ -344,11 +399,11 @@ export default function HotelDetails() {
 
           {alertOpenFor ? (
             <div className="modal-backdrop" role="presentation" onClick={() => setAlertOpenFor(null)}>
-              <div className="modal" role="dialog" aria-label="Create alert" onClick={(e) => e.stopPropagation()}>
+              <div className="modal" role="dialog" aria-label={t("hotelDetail.alertDialogAria")} onClick={(e) => e.stopPropagation()}>
                 <div className="modal-head">
-                  <h2>Create alert</h2>
+                  <h2>{t("hotelDetail.createAlertTitle")}</h2>
                   <button className="btn btn-small btn-outline" type="button" onClick={() => setAlertOpenFor(null)}>
-                    Close
+                    {t("hotelDetail.close")}
                   </button>
                 </div>
                 <Alert type="error">{alertMutation.error?.message}</Alert>
@@ -365,20 +420,25 @@ export default function HotelDetails() {
                   }}
                 >
                   <label>
-                    Type
+                    {t("hotelDetail.alertType")}
                     <select value={alertDraft.alertType} onChange={(e) => setAlertDraft((c) => ({ ...c, alertType: e.target.value }))}>
-                      <option value="PRICE_BELOW">PRICE_BELOW</option>
-                      <option value="AVAILABLE_NOW">AVAILABLE_NOW</option>
+                      <option value="PRICE_BELOW">{t("hotelDetail.alertTypePriceBelow")}</option>
+                      <option value="AVAILABLE_NOW">{t("hotelDetail.alertTypeAvailableNow")}</option>
                     </select>
                   </label>
                   {alertDraft.alertType === "PRICE_BELOW" ? (
                     <label>
-                      Target price
-                      <input value={alertDraft.targetPrice} onChange={(e) => setAlertDraft((c) => ({ ...c, targetPrice: e.target.value }))} placeholder="e.g. 80" required />
+                      {t("hotelDetail.targetPrice")}
+                      <input
+                        value={alertDraft.targetPrice}
+                        onChange={(e) => setAlertDraft((c) => ({ ...c, targetPrice: e.target.value }))}
+                        placeholder={t("hotelDetail.targetPricePlaceholder")}
+                        required
+                      />
                     </label>
                   ) : null}
                   <button className="btn btn-teal" disabled={alertMutation.isPending}>
-                    {alertMutation.isPending ? "Creating..." : "Create alert"}
+                    {alertMutation.isPending ? t("hotelDetail.creating") : t("hotelDetail.createAlert")}
                   </button>
                 </form>
               </div>

@@ -12,6 +12,8 @@ const emptyHotel = {
   address: "",
   city: "",
   country: "UK",
+  latitude: "",
+  longitude: "",
   phone: "",
   email: "",
   managerId: "",
@@ -92,10 +94,19 @@ export default function Dashboard() {
               <label key={field}>
                 {labelFor(field)}
                 <input
-                  type={field === "email" ? "email" : field === "managerId" ? "number" : "text"}
+                  type={
+                    field === "email"
+                      ? "email"
+                      : field === "managerId" ||
+                          field === "latitude" ||
+                          field === "longitude"
+                        ? "number"
+                        : "text"
+                  }
                   value={hotelForm[field]}
                   onChange={(event) => setHotelForm({ ...hotelForm, [field]: event.target.value })}
                   required={["name", "address", "city", "country", "managerId"].includes(field)}
+                  step={field === "latitude" || field === "longitude" ? "any" : undefined}
                 />
               </label>
             ))}
@@ -209,9 +220,15 @@ function submitForm(event, payload, mutation) {
 }
 
 function normalizeHotel(payload) {
+  const latitude =
+    payload.latitude === "" || payload.latitude == null ? null : Number(payload.latitude);
+  const longitude =
+    payload.longitude === "" || payload.longitude == null ? null : Number(payload.longitude);
   return {
     ...payload,
     managerId: Number(payload.managerId),
+    latitude: Number.isFinite(latitude) ? latitude : null,
+    longitude: Number.isFinite(longitude) ? longitude : null,
   };
 }
 

@@ -3,7 +3,12 @@ import { useTranslation } from "react-i18next";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { todayIso, tomorrowIso } from "../utils/dates";
 
-export default function SearchPanel({ compact = false, initialValues = {}, cityOptions = [] }) {
+export default function SearchPanel({
+  compact = false,
+  initialValues = {},
+  cityOptions = [],
+  navigateTo = "/hotels",
+}) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -49,7 +54,7 @@ export default function SearchPanel({ compact = false, initialValues = {}, cityO
     if (form.work) query.set("work", "1");
     else query.delete("work");
     query.delete("page");
-    navigate(`/hotels?${query.toString()}`);
+    navigate(`${navigateTo}?${query.toString()}`);
   }
 
   return (

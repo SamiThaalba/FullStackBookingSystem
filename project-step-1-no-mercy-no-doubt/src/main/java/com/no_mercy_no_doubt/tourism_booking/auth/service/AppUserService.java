@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Locale;
 
 @Service
 @RequiredArgsConstructor
@@ -73,5 +74,26 @@ public class AppUserService {
             throw new ResourceNotFoundException("User", id);
         }
         userRepository.deleteById(id);
+    }
+
+    @Transactional
+    public void updatePreferredUiLanguage(String username, String language) {
+        AppUser user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new ResourceNotFoundException("User was not found."));
+        user.setPreferredUiLanguage(normalizeUiLanguage(language));
+    }
+
+    private static String normalizeUiLanguage(String raw) {
+        if (raw == null || raw.isBlank()) {
+            throw new BusinessException("Language is required.");
+        }
+        String lc = raw.trim().toLowerCase(Locale.ROOT);
+        if (lc.startsWith("ar")) {
+            return "ar";
+        }
+        if (lc.startsWith("en")) {
+            return "en";
+        }
+        throw new BusinessException("Unsupported language. Use \"en\" or \"ar\".");
     }
 }

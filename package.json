@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@react-google-maps/api": "^2.20.8",
     "@tanstack/react-query": "latest",
     "i18next": "^26.0.8",
     "i18next-browser-languagedetector": "^8.2.1",

@@ -4,6 +4,7 @@ import ProtectedRoute from "./components/ProtectedRoute";
 import BookingConfirmation from "./pages/BookingConfirmation";
 import Dashboard from "./pages/Dashboard";
 import HotelDetails from "./pages/HotelDetails";
+import HotelsMap from "./pages/HotelsMap";
 import Hotels from "./pages/Hotels";
 import Home from "./pages/Home";
 import AuthCallback from "./pages/AuthCallback";
@@ -21,6 +22,7 @@ export default function App() {
     <Routes>
       <Route element={<Layout />}>
         <Route index element={<Home />} />
+        <Route path="hotels/map" element={<HotelsMap />} />
         <Route path="hotels" element={<Hotels />} />
         <Route path="hotels/:hotelId" element={<HotelDetails />} />
         <Route
