@@ -1,15 +1,17 @@
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { todayIso, tomorrowIso } from "../utils/dates";
 
 export default function SearchPanel({ compact = false, initialValues = {}, cityOptions = [] }) {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const cityListId = useMemo(
     () => `city-options-${Math.random().toString(16).slice(2)}`,
     [],
   );
   const [form, setForm] = useState({
-    city: initialValues.city || "",
+    city: initialValues.city || "Bethlehem",
     from: initialValues.from || todayIso(),
     to: initialValues.to || tomorrowIso(),
     adults: Number(initialValues.adults || 2),
@@ -20,6 +22,13 @@ export default function SearchPanel({ compact = false, initialValues = {}, cityO
   const [pickerOpen, setPickerOpen] = useState(false);
 
   const guestsTotal = Math.max(1, Number(form.adults) + Number(form.children));
+  const roomLabel = Number(form.rooms) === 1 ? t("search.roomSingular") : t("search.roomPlural");
+  const guestsSummary = t("search.guestsSummary", {
+    adults: form.adults,
+    children: form.children,
+    rooms: form.rooms,
+    roomLabel,
+  });
 
   function updateField(event) {
     const { name, value, type, checked } = event.target;
@@ -48,12 +57,12 @@ export default function SearchPanel({ compact = false, initialValues = {}, cityO
     >
       <div className="search-segment">
         <label>
-          <span>Where are you going?</span>
+          <span>{t("search.whereGoing")}</span>
           <input
             name="city"
             value={form.city}
             onChange={updateField}
-            placeholder="Select a city"
+            placeholder={t("search.cityPlaceholder")}
             list={cityOptions.length ? cityListId : undefined}
             autoComplete="off"
           />
@@ -69,65 +78,65 @@ export default function SearchPanel({ compact = false, initialValues = {}, cityO
 
       <div className="search-segment">
         <label>
-          <span>Check-in date</span>
+          <span>{t("search.checkIn")}</span>
           <input name="from" type="date" value={form.from} onChange={updateField} required />
         </label>
       </div>
 
       <div className="search-segment">
         <label>
-          <span>Check-out date</span>
+          <span>{t("search.checkOut")}</span>
           <input name="to" type="date" value={form.to} onChange={updateField} required />
         </label>
       </div>
 
       <div className="search-segment search-segment-picker">
         <label>
-          <span>Guests & rooms</span>
+          <span>{t("search.guestsRooms")}</span>
           <button
             type="button"
             className="picker-button"
             onClick={() => setPickerOpen((open) => !open)}
             aria-expanded={pickerOpen}
           >
-            {form.adults} adults · {form.children} children · {form.rooms} room{Number(form.rooms) === 1 ? "" : "s"}
+            {guestsSummary}
           </button>
         </label>
         {pickerOpen ? (
-          <div className="picker-popover" role="dialog" aria-label="Guests and rooms">
+          <div className="picker-popover" role="dialog" aria-label={t("search.guestsRoomsDialog")}>
             <PickerRow
-              label="Adults"
+              label={t("search.adults")}
               value={Number(form.adults)}
               min={1}
               onChange={(next) => setForm((current) => ({ ...current, adults: next }))}
             />
             <PickerRow
-              label="Children"
+              label={t("search.children")}
               value={Number(form.children)}
               min={0}
               onChange={(next) => setForm((current) => ({ ...current, children: next }))}
             />
             <PickerRow
-              label="Rooms"
+              label={t("search.rooms")}
               value={Number(form.rooms)}
               min={1}
               onChange={(next) => setForm((current) => ({ ...current, rooms: next }))}
             />
             <button type="button" className="btn btn-small btn-outline" onClick={() => setPickerOpen(false)}>
-              Done
+              {t("search.done")}
             </button>
           </div>
         ) : null}
       </div>
 
       <button className="btn btn-search" type="submit">
-        Search
+        {t("search.search")}
       </button>
 
       {!compact ? (
         <label className="work-row">
           <input name="work" type="checkbox" checked={form.work} onChange={updateField} />
-          <span>I'm travelling for work</span>
+          <span>{t("search.workTrip")}</span>
         </label>
       ) : null}
     </form>
@@ -135,6 +144,7 @@ export default function SearchPanel({ compact = false, initialValues = {}, cityO
 }
 
 function PickerRow({ label, value, min, onChange }) {
+  const { t } = useTranslation();
   return (
     <div className="picker-row">
       <span className="picker-label">{label}</span>
@@ -143,7 +153,7 @@ function PickerRow({ label, value, min, onChange }) {
           type="button"
           className="picker-step"
           onClick={() => onChange(Math.max(min, value - 1))}
-          aria-label={`Decrease ${label}`}
+          aria-label={t("search.decrease", { label })}
           disabled={value <= min}
         >
           –
@@ -153,7 +163,7 @@ function PickerRow({ label, value, min, onChange }) {
           type="button"
           className="picker-step"
           onClick={() => onChange(value + 1)}
-          aria-label={`Increase ${label}`}
+          aria-label={t("search.increase", { label })}
         >
           +
         </button>

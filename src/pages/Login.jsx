@@ -1,10 +1,12 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import Alert from "../components/Alert";
 import { useAuth } from "../auth/AuthContext";
 import { clearBookingIntent, readBookingIntent } from "../auth/bookingIntent";
 
 export default function Login() {
+  const { t } = useTranslation();
   const auth = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -33,13 +35,13 @@ export default function Login() {
   return (
     <section className="auth-page container">
       <div className="auth-card">
-        <p className="eyebrow">Welcome back</p>
-        <h1>Log in</h1>
-        <p className="muted">Use your backend username and password to access protected catalog APIs.</p>
+        <p className="eyebrow">{t("login.eyebrow")}</p>
+        <h1>{t("login.title")}</h1>
+        <p className="muted">{t("login.hint")}</p>
         <Alert type="error">{error}</Alert>
         <form className="stack-form" onSubmit={submit}>
           <label>
-            Username
+            {t("login.username")}
             <input
               value={form.username}
               onChange={(event) => setForm({ ...form, username: event.target.value })}
@@ -48,7 +50,7 @@ export default function Login() {
             />
           </label>
           <label>
-            Password
+            {t("login.password")}
             <input
               type="password"
               value={form.password}
@@ -58,7 +60,7 @@ export default function Login() {
             />
           </label>
           <button className="btn btn-teal btn-full" disabled={loading}>
-            {loading ? "Signing in..." : "Log in"}
+            {loading ? t("login.submitting") : t("login.submit")}
           </button>
         </form>
         {googleOAuthUrl ? (
@@ -72,15 +74,13 @@ export default function Login() {
               window.location.assign(url.toString());
             }}
           >
-            Continue with Google
+            {t("login.continueGoogle")}
           </button>
         ) : (
-          <p className="muted">
-            Google login is not configured yet. Set <strong>VITE_GOOGLE_OAUTH_URL</strong> to enable it.
-          </p>
+          <p className="muted">{t("login.googleNotConfigured")}</p>
         )}
         <p>
-          New here? <Link to="/register">Create an account</Link>
+          {t("login.newHere")} <Link to="/register">{t("login.createAccount")}</Link>
         </p>
       </div>
     </section>

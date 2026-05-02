@@ -10,8 +10,11 @@
   },
   "dependencies": {
     "@tanstack/react-query": "latest",
+    "i18next": "^26.0.8",
+    "i18next-browser-languagedetector": "^8.2.1",
     "react": "latest",
     "react-dom": "latest",
+    "react-i18next": "^17.0.6",
     "react-router-dom": "latest"
   },
   "devDependencies": {

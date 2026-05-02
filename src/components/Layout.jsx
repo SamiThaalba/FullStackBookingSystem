@@ -1,7 +1,11 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useAuth } from "../auth/AuthContext";
+import I18nHtmlAttributes from "./I18nHtmlAttributes";
+import LanguageSwitcher from "./LanguageSwitcher";
 
 export default function Layout() {
+  const { t } = useTranslation();
   const auth = useAuth();
   const navigate = useNavigate();
 
@@ -12,21 +16,23 @@ export default function Layout() {
 
   return (
     <div className="app-shell">
+      <I18nHtmlAttributes />
       <header className="site-header">
         <nav className="nav container">
-          <NavLink to="/" className="brand" aria-label="QuickReserve home">
+          <NavLink to="/" className="brand" aria-label={t("layout.brandAria")}>
             <span>QuickReserve</span>
             <span className="moon">crescent</span>
           </NavLink>
 
           <div className="nav-links">
-            {!auth.isAuthenticated || auth.isCustomer ? <NavLink to="/hotels">Discover</NavLink> : null}
-            {auth.isAuthenticated && auth.isCustomer ? <NavLink to="/my-bookings">My bookings</NavLink> : null}
-            {auth.isManager && <NavLink to="/dashboard">Manager</NavLink>}
-            {auth.hasPermission("role:manage") && <NavLink to="/admin/roles">Admin</NavLink>}
+            {!auth.isAuthenticated || auth.isCustomer ? <NavLink to="/hotels">{t("layout.discover")}</NavLink> : null}
+            {auth.isAuthenticated && auth.isCustomer ? <NavLink to="/my-bookings">{t("layout.myBookings")}</NavLink> : null}
+            {auth.isManager && <NavLink to="/dashboard">{t("layout.manager")}</NavLink>}
+            {auth.hasPermission("role:manage") && <NavLink to="/admin/roles">{t("layout.admin")}</NavLink>}
           </div>
 
           <div className="nav-actions">
+            <LanguageSwitcher />
             {auth.isAuthenticated ? (
               <>
                 <NavLink className="user-pill" to="/profile">
@@ -34,20 +40,20 @@ export default function Layout() {
                 </NavLink>
                 {auth.hasPermission("notification:view") && (
                   <NavLink className="btn btn-small btn-outline" to="/notifications">
-                    Notifications
+                    {t("layout.notifications")}
                   </NavLink>
                 )}
                 <button className="btn btn-small btn-outline" onClick={handleLogout}>
-                  Log out
+                  {t("layout.logOut")}
                 </button>
               </>
             ) : (
               <>
                 <NavLink className="btn btn-small btn-primary" to="/login">
-                  Log in
+                  {t("layout.logIn")}
                 </NavLink>
                 <NavLink className="btn btn-small btn-teal" to="/register">
-                  Sign up
+                  {t("layout.signUp")}
                 </NavLink>
               </>
             )}
@@ -66,15 +72,15 @@ export default function Layout() {
               <span>QuickReserve</span>
               <span className="moon">crescent</span>
             </div>
-            <p>Book stays with confidence, with fast search and secure booking.</p>
+            <p>{t("layout.footerTagline")}</p>
           </div>
           <div>
-            <h3>Follow us</h3>
-            <p>Instagram / Facebook / X / LinkedIn</p>
+            <h3>{t("layout.followUs")}</h3>
+            <p>{t("layout.socialPlaceholder")}</p>
           </div>
           <div>
-            <h3>Project team</h3>
-            <p>No Mercy No Doubt tourism booking platform.</p>
+            <h3>{t("layout.projectTeam")}</h3>
+            <p>{t("layout.teamTagline")}</p>
           </div>
         </div>
       </footer>

@@ -1,9 +1,11 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router-dom";
 import Alert from "../components/Alert";
 import { useAuth } from "../auth/AuthContext";
 
 export default function Register() {
+  const { t } = useTranslation();
   const auth = useAuth();
   const navigate = useNavigate();
   const [form, setForm] = useState({ username: "", email: "", password: "" });
@@ -31,21 +33,21 @@ export default function Register() {
   return (
     <section className="auth-page container">
       <div className="auth-card">
-        <p className="eyebrow">Join QuickReserve</p>
-        <h1>Create account</h1>
-        <p className="muted">Registration creates a customer account when the backend CUSTOMER role is seeded.</p>
+        <p className="eyebrow">{t("register.eyebrow")}</p>
+        <h1>{t("register.title")}</h1>
+        <p className="muted">{t("register.hint")}</p>
         <Alert type="error">{error}</Alert>
         <form className="stack-form" onSubmit={submit}>
           <label>
-            Username
+            {t("register.username")}
             <input value={form.username} onChange={update("username")} required autoComplete="username" />
           </label>
           <label>
-            Email
+            {t("register.email")}
             <input type="email" value={form.email} onChange={update("email")} required autoComplete="email" />
           </label>
           <label>
-            Password
+            {t("register.password")}
             <input
               type="password"
               minLength="8"
@@ -56,11 +58,11 @@ export default function Register() {
             />
           </label>
           <button className="btn btn-teal btn-full" disabled={loading}>
-            {loading ? "Creating..." : "Sign up"}
+            {loading ? t("register.submitting") : t("register.submit")}
           </button>
         </form>
         <p>
-          Already have an account? <Link to="/login">Log in</Link>
+          {t("register.haveAccount")} <Link to="/login">{t("register.logIn")}</Link>
         </p>
       </div>
     </section>

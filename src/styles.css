@@ -1,3 +1,5 @@
+@import url("https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@400;600;700;800&display=swap");
+
 :root {
   --purple: #54206f;
   --purple-dark: #321246;
@@ -10,7 +12,15 @@
   --line: #e7e2ea;
   --card: #ffffff;
   --shadow: 0 18px 45px rgba(47, 24, 68, 0.12);
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family:
+    Inter,
+    "Noto Sans Arabic",
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
   color: var(--ink);
   background: #faf9fb;
 }
@@ -247,8 +257,8 @@ select {
   padding: 8px 10px;
 }
 
-.search-panel-bar .search-segment + .search-segment {
-  border-left: 1px solid var(--line);
+.search-panel-bar .search-segment+.search-segment {
+  border-inline-start: 1px solid var(--line);
 }
 
 .search-panel-bar label {
@@ -260,16 +270,49 @@ select {
   border-radius: 12px;
 }
 
+.lang-switcher {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  overflow: hidden;
+  background: #fff;
+}
+
+.lang-switcher__btn {
+  margin: 0;
+  padding: 6px 12px;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.lang-switcher__btn.is-active {
+  background: var(--cream);
+  color: var(--purple);
+}
+
+.lang-switcher__btn:not(.is-active):hover {
+  color: var(--ink);
+}
+
 .picker-button {
   width: 100%;
+  min-height: 62px;
   border: 1px solid var(--line);
   border-radius: 12px;
   padding: 12px 13px;
   background: #fff;
-  text-align: left;
+  text-align: start;
+  line-height: 1.35;
   font-weight: 800;
   color: var(--ink);
   cursor: pointer;
+  white-space: normal;
 }
 
 .picker-button:hover {
@@ -282,17 +325,17 @@ select {
 
 .picker-popover {
   position: absolute;
-  z-index: 5;
-  top: calc(100% + 10px);
-  left: 10px;
-  right: 10px;
+  z-index: 9999;
+  top: calc(100% + 14px);
+  right: 0;
+  width: 260px;
   border: 1px solid var(--line);
-  border-radius: 16px;
+  border-radius: 18px;
   background: #fff;
-  padding: 14px;
-  box-shadow: var(--shadow);
+  padding: 16px;
+  box-shadow: 0 18px 45px rgba(47, 24, 68, 0.18);
   display: grid;
-  gap: 12px;
+  gap: 14px;
 }
 
 .picker-row {
@@ -828,6 +871,7 @@ th {
 }
 
 @media (max-width: 900px) {
+
   .nav,
   .nav-links,
   .nav-actions {
@@ -850,8 +894,8 @@ th {
     grid-template-columns: 1fr 1fr;
   }
 
-  .search-panel-bar .search-segment + .search-segment {
-    border-left: 0;
+  .search-panel-bar .search-segment+.search-segment {
+    border-inline-start: 0;
     border-top: 1px solid var(--line);
   }
 

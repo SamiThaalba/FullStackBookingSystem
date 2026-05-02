@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Navigate, useSearchParams } from "react-router-dom";
 import { bookingApi } from "../api/bookingApi";
 import { useAuth } from "../auth/AuthContext";
@@ -8,6 +9,7 @@ import HotelCard from "../components/HotelCard";
 import SearchPanel from "../components/SearchPanel";
 
 export default function Hotels() {
+  const { t } = useTranslation();
   const auth = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [page, setPage] = useState(Number(searchParams.get("page") || 0));
@@ -67,7 +69,7 @@ export default function Hotels() {
 
       <div className="results-toolbar">
         <button className="filter-button" type="button">
-          Filter by
+          {t("hotels.filterBy")}
         </button>
         <select
           className="filter-button"
@@ -77,19 +79,19 @@ export default function Hotels() {
             setPage(0);
           }}
         >
-          <option value="">Recommended</option>
-          <option value="BU">Bethlehem</option>
-          <option value="Bethlehem">Bethlehem (full)</option>
+          <option value="">{t("hotels.recommended")}</option>
+          <option value="BU">{t("hotels.bethlehemShort")}</option>
+          <option value="Bethlehem">{t("hotels.bethlehemFull")}</option>
         </select>
         <button className="filter-button" type="button">
-          Map view
+          {t("hotels.mapView")}
         </button>
       </div>
 
       <Alert type="error">{hotelsQuery.error?.message}</Alert>
 
       {hotelsQuery.isLoading ? (
-        <div className="empty-state">Loading hotels...</div>
+        <div className="empty-state">{t("hotels.loading")}</div>
       ) : hotels.length ? (
         <div className="hotel-list">
           {hotels.map((hotel) => (
@@ -98,21 +100,24 @@ export default function Hotels() {
         </div>
       ) : (
         <div className="empty-state">
-          <h2>No hotels found</h2>
-          <p>Try another city or check that hotel data exists in the backend database.</p>
+          <h2>{t("hotels.noResultsTitle")}</h2>
+          <p>{t("hotels.noResultsBody")}</p>
         </div>
       )}
 
       {hotelsQuery.data && (
         <div className="pagination">
           <button disabled={hotelsQuery.data.first} onClick={() => changePage(page - 1)}>
-            Previous
+            {t("hotels.previous")}
           </button>
           <span>
-            Page {hotelsQuery.data.page + 1} of {Math.max(hotelsQuery.data.totalPages, 1)}
+            {t("hotels.pageOf", {
+              page: hotelsQuery.data.page + 1,
+              total: Math.max(hotelsQuery.data.totalPages, 1),
+            })}
           </span>
           <button disabled={hotelsQuery.data.last} onClick={() => changePage(page + 1)}>
-            Next
+            {t("hotels.next")}
           </button>
         </div>
       )}

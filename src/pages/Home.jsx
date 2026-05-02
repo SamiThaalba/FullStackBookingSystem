@@ -1,8 +1,10 @@
 import { Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import SearchPanel from "../components/SearchPanel";
 import { useAuth } from "../auth/AuthContext";
 
 export default function Home() {
+  const { t } = useTranslation();
   const auth = useAuth();
 
   return (
@@ -10,24 +12,21 @@ export default function Home() {
       <section className="hero">
         <div className="container hero-grid">
           <div className="hero-copy">
-            <p className="eyebrow">QuickReserve</p>
-            <h1>Find your next stay in Palestine, fast.</h1>
-            <p>
-              Search trusted stays, compare room types, check live availability, and book in minutes with a smooth,
-              mobile-first experience.
-            </p>
+            <p className="eyebrow">{t("home.eyebrow")}</p>
+            <h1>{t("home.title")}</h1>
+            <p>{t("home.lead")}</p>
             <div className="hero-actions">
               {auth.isAuthenticated ? (
                 <Link className="btn btn-teal" to="/hotels">
-                  Start searching
+                  {t("home.startSearching")}
                 </Link>
               ) : (
-                <Link className="btn btn-teal" to="/register">
-                  Create account
+                <Link className="btn btn-teal" to="/login">
+                  {t("home.login")}
                 </Link>
               )}
               <a className="btn btn-outline" href="#about">
-                About the project
+                {t("home.aboutProject")}
               </a>
             </div>
           </div>
@@ -39,21 +38,21 @@ export default function Home() {
 
       <section className="container section" id="about">
         <div className="section-heading">
-          <p className="eyebrow">Built for real journeys</p>
-          <h2>Everything you need to book with confidence</h2>
+          <p className="eyebrow">{t("home.sectionEyebrow")}</p>
+          <h2>{t("home.sectionTitle")}</h2>
         </div>
         <div className="feature-grid">
           <article className="feature-card">
-            <h3>Guest search</h3>
-            <p>Search by city, dates, and guests. Compare hotels and room types with clear details.</p>
+            <h3>{t("home.featureSearchTitle")}</h3>
+            <p>{t("home.featureSearchBody")}</p>
           </article>
           <article className="feature-card">
-            <h3>Secure booking</h3>
-            <p>Instant booking flow with availability checks and a smooth mock payment experience.</p>
+            <h3>{t("home.featureBookingTitle")}</h3>
+            <p>{t("home.featureBookingBody")}</p>
           </article>
           <article className="feature-card">
-            <h3>Manager tools</h3>
-            <p>Manage your own hotels and room types, and review upcoming bookings in one dashboard.</p>
+            <h3>{t("home.featureManagerTitle")}</h3>
+            <p>{t("home.featureManagerBody")}</p>
           </article>
         </div>
       </section>
@@ -61,16 +60,16 @@ export default function Home() {
       <section className="promo-band">
         <div className="container promo-grid">
           <div>
-            <h2>Why guests choose QuickReserve</h2>
-            <p>Simple search, transparent pricing, and fast booking — built for a great local travel experience.</p>
+            <h2>{t("home.promoTitle")}</h2>
+            <p>{t("home.promoBody")}</p>
           </div>
           <div className="stat-card">
-            <strong>Fast</strong>
-            <span>search to booking</span>
+            <strong>{t("home.statFast")}</strong>
+            <span>{t("home.statFastSub")}</span>
           </div>
           <div className="stat-card">
-            <strong>Smart</strong>
-            <span>price & availability alerts</span>
+            <strong>{t("home.statSmart")}</strong>
+            <span>{t("home.statSmartSub")}</span>
           </div>
         </div>
       </section>
