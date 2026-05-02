@@ -21,6 +21,7 @@ export const bookingApi = {
 
     listHotels: (params) => apiRequest(`/hotels?${toQuery(params)}`),
 
+    // ✅ FIX #7
     getMyHotels: () => apiRequest("/hotels/my"),
 
     getHotel: (id) => apiRequest(`/hotels/${id}`),
@@ -77,6 +78,7 @@ export const bookingApi = {
 
     myBookings: () => apiRequest("/bookings/my"),
 
+    // ✅ FIX #15 (cleaner API call)
     upcomingBookings: (hotelId) =>
         hotelId
             ? apiRequest(`/bookings/upcoming?hotelId=${hotelId}`)
@@ -108,6 +110,7 @@ export const bookingApi = {
             method: "PUT",
         }),
 
+    // ✅ FIX #12 (analytics)
     managerDashboard: (managerId) =>
         apiRequest(`/managers/${managerId}/dashboard`),
 
