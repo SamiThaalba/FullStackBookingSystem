@@ -85,9 +85,12 @@ public class BookingService {
                     .map(Hotel::getId)
                     .toList();
 
-            return bookingRepository.findAll()
+            if (managedHotelIds.isEmpty()) {
+                return List.of();
+            }
+
+            return bookingRepository.findByHotelIdIn(managedHotelIds)
                     .stream()
-                    .filter(booking -> managedHotelIds.contains(booking.getHotelId()))
                     .map(bookingMapper::toResponse)
                     .toList();
         }
@@ -124,9 +127,12 @@ public class BookingService {
                     .map(Hotel::getId)
                     .toList();
 
-            return bookingRepository.findByStatus(status)
+            if (managedHotelIds.isEmpty()) {
+                return List.of();
+            }
+
+            return bookingRepository.findByHotelIdInAndStatus(managedHotelIds, status)
                     .stream()
-                    .filter(booking -> managedHotelIds.contains(booking.getHotelId()))
                     .map(bookingMapper::toResponse)
                     .toList();
         }
@@ -172,11 +178,15 @@ public class BookingService {
                     .map(Hotel::getId)
                     .toList();
 
-            return bookingRepository.findByStartDateGreaterThanEqualAndStatusNotOrderByStartDateAsc(
-                            today,
-                            BookingStatus.CANCELLED
-                    ).stream()
-                    .filter(booking -> managedHotelIds.contains(booking.getHotelId()))
+            if (managedHotelIds.isEmpty()) {
+                return List.of();
+            }
+
+
+            return bookingRepository
+                    .findByHotelIdInAndStartDateGreaterThanEqualOrderByStartDateAsc(managedHotelIds, today)
+                    .stream()
+                    .filter(b -> b.getStatus() != BookingStatus.CANCELLED)
                     .map(bookingMapper::toResponse)
                     .toList();
         }
@@ -190,9 +200,18 @@ public class BookingService {
     }
 
     public BookingResponse confirmBooking(Long id) {
-
         Booking booking = bookingRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("booking", id));
+
+        ensureCanManageBooking(booking);
+
+        if (booking.getStatus() == BookingStatus.CONFIRMED) {
+            throw new BusinessException("Booking is already confirmed.");
+        }
+
+        if (booking.getStatus() == BookingStatus.CANCELLED) {
+            throw new BusinessException("Cannot confirm a cancelled booking.");
+        }
 
         RoomType roomType = roomTypeRepository.findByIdForUpdate(booking.getRoomTypeId())
                 .orElseThrow(() -> new ResourceNotFoundException("roomType", booking.getRoomTypeId()));
@@ -278,7 +297,6 @@ public class BookingService {
         if (request.getRoomTypeId() == null) {
             throw new BusinessException("Room type ID is required.");
         }
-
         validateDateRange(request.getStartDate(), request.getEndDate());
     }
 
@@ -313,65 +331,45 @@ public class BookingService {
     private void ensureCanAccessBooking(Booking booking) {
         AppUser currentUser = currentUserProvider.getCurrentUser();
 
-        if (isAdmin(currentUser)) {
-            return;
-        }
+        if (isAdmin(currentUser)) return;
+        if (booking.getGuestId().equals(currentUser.getId())) return;
+        if (isManager(currentUser) && managesHotel(currentUser.getId(), booking.getHotelId())) return;
 
-        if (booking.getGuestId().equals(currentUser.getId())) {
-            return;
-        }
-
-        if (isManager(currentUser) && managesHotel(currentUser.getId(), booking.getHotelId())) {
-            return;
-        }
-
-        throw new org.springframework.security.access.AccessDeniedException("You are not allowed to access this booking.");
+        throw new org.springframework.security.access.AccessDeniedException(
+                "You are not allowed to access this booking.");
     }
 
     private void ensureCanManageBooking(Booking booking) {
         AppUser currentUser = currentUserProvider.getCurrentUser();
 
-        if (isAdmin(currentUser)) {
-            return;
-        }
+        if (isAdmin(currentUser)) return;
+        if (isManager(currentUser) && managesHotel(currentUser.getId(), booking.getHotelId())) return;
 
-        if (isManager(currentUser) && managesHotel(currentUser.getId(), booking.getHotelId())) {
-            return;
-        }
-
-        throw new org.springframework.security.access.AccessDeniedException("You are not allowed to manage this booking.");
+        throw new org.springframework.security.access.AccessDeniedException(
+                "You are not allowed to manage this booking.");
     }
 
     private void ensureCanCancelBooking(Booking booking) {
         AppUser currentUser = currentUserProvider.getCurrentUser();
 
-        if (isAdmin(currentUser)) {
-            return;
-        }
+        if (isAdmin(currentUser)) return;
+        if (booking.getGuestId().equals(currentUser.getId())) return;
+        if (isManager(currentUser) && managesHotel(currentUser.getId(), booking.getHotelId())) return;
 
-        if (booking.getGuestId().equals(currentUser.getId())) {
-            return;
-        }
-
-        if (isManager(currentUser) && managesHotel(currentUser.getId(), booking.getHotelId())) {
-            return;
-        }
-
-        throw new org.springframework.security.access.AccessDeniedException("You are not allowed to cancel this booking.");
+        throw new org.springframework.security.access.AccessDeniedException(
+                "You are not allowed to cancel this booking.");
     }
 
     private void ensureCanAccessHotel(Hotel hotel) {
         AppUser currentUser = currentUserProvider.getCurrentUser();
 
-        if (isAdmin(currentUser)) {
-            return;
-        }
+        if (isAdmin(currentUser)) return;
+        if (isManager(currentUser)
+                && hotel.getManagerId() != null
+                && hotel.getManagerId().equals(currentUser.getId())) return;
 
-        if (isManager(currentUser) && hotel.getManagerId() != null && hotel.getManagerId().equals(currentUser.getId())) {
-            return;
-        }
-
-        throw new org.springframework.security.access.AccessDeniedException("You are not allowed to access this hotel's bookings.");
+        throw new org.springframework.security.access.AccessDeniedException(
+                "You are not allowed to access this hotel's bookings.");
     }
 
     private boolean managesHotel(Long managerId, Long hotelId) {
@@ -387,7 +385,11 @@ public class BookingService {
     private boolean isManager(AppUser user) {
         return roleManagementService.userHasRole(user, "MANAGER");
     }
-    private void validateAvailabilityExcludingCurrent(RoomType roomType, LocalDate startDate, LocalDate endDate, Long bookingId) {
+
+    private void validateAvailabilityExcludingCurrent(RoomType roomType,
+                                                      LocalDate startDate,
+                                                      LocalDate endDate,
+                                                      Long bookingId) {
         long overlappingBookings = bookingRepository.countActiveOverlappingBookingsExcluding(
                 roomType.getId(), startDate, endDate, bookingId
         );
