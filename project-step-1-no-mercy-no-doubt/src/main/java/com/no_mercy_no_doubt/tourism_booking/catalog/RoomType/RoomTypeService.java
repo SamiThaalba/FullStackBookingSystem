@@ -7,6 +7,7 @@ import com.no_mercy_no_doubt.tourism_booking.catalog.Hotel.Hotel;
 import com.no_mercy_no_doubt.tourism_booking.catalog.Hotel.HotelRepository;
 import com.no_mercy_no_doubt.tourism_booking.common.exception.ResourceNotFoundException;
 import com.no_mercy_no_doubt.tourism_booking.common.utils.CurrentUserProvider;
+import com.no_mercy_no_doubt.tourism_booking.wishlist.repository.PriceAvailabilityAlertRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
@@ -24,12 +25,15 @@ public class RoomTypeService {
     private final CatalogMapper mapper;
     private final CurrentUserProvider currentUserProvider;
     private final RoleManagementService roleManagementService;
+    // FIX: inject so we can delete orphan alerts before deleting a room type
+    private final PriceAvailabilityAlertRepository alertRepository;
 
     @Transactional
     public RoomTypeResponse createRoomType(RoomTypeRequest request) {
         Hotel hotel = hotelRepository.findById(request.getHotelId())
                 .orElseThrow(() -> new ResourceNotFoundException("Hotel", request.getHotelId()));
 
+        // FIX: only the hotel's manager (or admin) may add rooms
         ensureCanManageHotel(hotel);
 
         RoomType roomType = mapper.toEntity(request, hotel);
@@ -46,6 +50,7 @@ public class RoomTypeService {
             throw new ResourceNotFoundException("RoomType", roomTypeId);
         }
 
+        // FIX: only the hotel's manager (or admin) may update rooms
         ensureCanManageHotel(roomType.getHotel());
 
         mapper.updateRoomType(roomType, request);
@@ -78,7 +83,24 @@ public class RoomTypeService {
         RoomType roomType = roomTypeRepository.findById(roomTypeId)
                 .orElseThrow(() -> new ResourceNotFoundException("RoomType", roomTypeId));
 
+        // FIX: only the hotel's manager (or admin) may delete rooms
         ensureCanManageHotel(roomType.getHotel());
+
+        // FIX: delete all price/availability alerts referencing this room type first,
+        // otherwise the FK constraint on price_availability_alerts(room_type_id) will
+        // prevent the delete with a DataIntegrityViolationException.
+        List<Long> alertIds = alertRepository
+                .findByRoomTypeIdAndActiveTrueWithAssociations(roomTypeId)
+                .stream()
+                .map(a -> a.getId())
+                .collect(Collectors.toList());
+
+        if (!alertIds.isEmpty()) {
+            alertRepository.deleteAllById(alertIds);
+        }
+
+        // Also delete ALL alerts for this room (active and inactive) to be safe
+        alertRepository.deleteByRoomTypeId(roomTypeId);
 
         roomTypeRepository.deleteById(roomTypeId);
     }

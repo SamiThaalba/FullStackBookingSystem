@@ -2,6 +2,7 @@ package com.no_mercy_no_doubt.tourism_booking.wishlist.repository;
 
 import com.no_mercy_no_doubt.tourism_booking.wishlist.entity.PriceAvailabilityAlert;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -19,7 +20,8 @@ public interface PriceAvailabilityAlertRepository extends JpaRepository<PriceAva
             LEFT JOIN FETCH rt.hotel
             WHERE a.active = true AND rt.id = :roomTypeId
             """)
-    List<PriceAvailabilityAlert> findByRoomTypeIdAndActiveTrueWithAssociations(@Param("roomTypeId") Long roomTypeId);
+    List<PriceAvailabilityAlert> findByRoomTypeIdAndActiveTrueWithAssociations(
+            @Param("roomTypeId") Long roomTypeId);
 
     @Query("SELECT a.id FROM PriceAvailabilityAlert a WHERE a.active = true AND a.triggered = false")
     List<Long> findIdsByActiveTrueAndTriggeredFalse();
@@ -34,4 +36,11 @@ public interface PriceAvailabilityAlertRepository extends JpaRepository<PriceAva
     Optional<PriceAvailabilityAlert> findByIdWithAssociations(@Param("id") Long id);
 
     Optional<PriceAvailabilityAlert> findByIdAndUserId(Long id, Long userId);
+
+    // FIX: used by RoomTypeService.deleteRoomType to remove ALL alerts for a room
+    // (active and inactive) before deleting the room, preventing the FK constraint
+    // violation on price_availability_alerts(room_type_id).
+    @Modifying
+    @Query("DELETE FROM PriceAvailabilityAlert a WHERE a.roomType.id = :roomTypeId")
+    void deleteByRoomTypeId(@Param("roomTypeId") Long roomTypeId);
 }
