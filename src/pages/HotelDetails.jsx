@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { bookingApi } from "../api/bookingApi";
 import { useAuth } from "../auth/AuthContext";
 import { storeBookingIntent } from "../auth/bookingIntent";
@@ -21,10 +21,6 @@ export default function HotelDetails() {
   const navigate = useNavigate();
   const auth = useAuth();
   const queryClient = useQueryClient();
-
-  if (auth.isAuthenticated && !auth.isCustomer) {
-    return <Navigate to={auth.isAdmin ? "/admin/roles" : "/dashboard"} replace />;
-  }
 
   const [selectedRoom, setSelectedRoom] = useState(null);
   const [dates, setDates] = useState({
@@ -112,7 +108,7 @@ export default function HotelDetails() {
 
   const hotel = hotelQuery.data;
   const wishlistHotelEnabled =
-    auth.isAuthenticated && auth.isCustomer && Boolean(hotel?.id);
+    auth.isAuthenticated && auth.hasPermission("wishlist:manage") && Boolean(hotel?.id);
   const wishlistHotel =
     hotel ?? { id: undefined, name: "", city: null, imageUrl: null };
   const { isInWishlist, toggleMutation } = useHotelWishlistToggle(
@@ -244,7 +240,7 @@ export default function HotelDetails() {
                           <RoomWishlistButton
                             room={room}
                             hotel={hotel}
-                            enabled={auth.isAuthenticated && auth.isCustomer}
+                            enabled={auth.isAuthenticated && auth.hasPermission("wishlist:manage")}
                           />
                           <button
                             className="btn btn-small btn-outline"
@@ -437,6 +433,9 @@ export default function HotelDetails() {
                       />
                     </label>
                   ) : null}
+                  <p className="muted" style={{ fontSize: "0.9rem" }}>
+                    {t("hotelDetail.alertNotifyEmailHint")}
+                  </p>
                   <button className="btn btn-teal" disabled={alertMutation.isPending}>
                     {alertMutation.isPending ? t("hotelDetail.creating") : t("hotelDetail.createAlert")}
                   </button>

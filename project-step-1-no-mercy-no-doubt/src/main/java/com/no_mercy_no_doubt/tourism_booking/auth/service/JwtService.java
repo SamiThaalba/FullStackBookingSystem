@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 import java.util.Date;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.function.Function;
 
@@ -45,15 +46,14 @@ public class JwtService {
                 .sorted()
                 .toList();
 
-        return generateToken(
-                Map.of(
-                        "id", user.getId(),
-                        "email", user.getEmail(),
-                        "roles", roles,
-                        "permissions", permissions
-                ),
-                user.getUsername()
-        );
+        Map<String, Object> claims = new LinkedHashMap<>();
+        claims.put("id", user.getId());
+        claims.put("email", user.getEmail());
+        claims.put("roles", roles);
+        claims.put("permissions", permissions);
+        String avatar = user.getAvatarUrl();
+        claims.put("avatarUrl", avatar != null && !avatar.isBlank() ? avatar : "");
+        return generateToken(claims, user.getUsername());
     }
 
     public String generateToken(Map<String, Object> extraClaims, String username) {

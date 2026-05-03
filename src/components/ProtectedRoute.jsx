@@ -16,20 +16,20 @@ export default function ProtectedRoute({
     return <Navigate to="/login" replace state={{ from }} />;
   }
 
-  if (requireAdmin && !auth.isAdmin) {
-    return <Navigate to="/my-bookings" replace />;
+  if (requireAdmin && !auth.hasPermission("user:manage")) {
+    return <Navigate to="/" replace />;
   }
 
   if (requirePermission && !auth.hasPermission(requirePermission)) {
-    return <Navigate to="/my-bookings" replace />;
+    return <Navigate to="/" replace />;
   }
 
-  if (requireManager && !auth.isManager) {
-    return <Navigate to={auth.isAdmin ? "/admin/roles" : "/my-bookings"} replace />;
+  if (requireManager && !auth.hasPermission("hotel:update")) {
+    return <Navigate to="/" replace />;
   }
 
-  if (requireCustomer && !auth.isCustomer) {
-    return <Navigate to={auth.isAdmin ? "/admin/roles" : "/dashboard"} replace />;
+  if (requireCustomer && auth.hasPermission("hotel:update")) {
+    return <Navigate to="/dashboard" replace />;
   }
 
   return children;

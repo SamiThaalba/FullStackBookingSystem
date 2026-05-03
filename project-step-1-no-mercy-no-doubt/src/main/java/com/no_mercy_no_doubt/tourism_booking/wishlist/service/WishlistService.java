@@ -128,8 +128,8 @@ public class WishlistService {
     }
 
     private String buildHotelSubtitle(Hotel hotel) {
-        String city = hotel.getCity() != null ? hotel.getCity() : "";
-        String country = hotel.getCountry() != null ? hotel.getCountry() : "";
+        String city = hotel.getDisplayCity() != null ? hotel.getDisplayCity() : "";
+        String country = hotel.getDisplayCountry() != null ? hotel.getDisplayCountry() : "";
 
         if (!city.isBlank() && !country.isBlank()) {
             return city + ", " + country;

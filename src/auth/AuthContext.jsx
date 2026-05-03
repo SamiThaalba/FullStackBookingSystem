@@ -36,15 +36,26 @@ export function AuthProvider({ children }) {
     }
   }
 
+  /** Persist new tokens from the API (e.g. after PATCH /me/avatar). */
+  function applyAuthResponse(response) {
+    writeStoredAuth(response);
+    setAuth(response);
+  }
+
+  const hasPermission = (permission) => user?.permissions?.includes(permission);
+
   const value = {
     auth,
     user,
+    applyAuthResponse,
     isAuthenticated: Boolean(auth?.accessToken),
-    // Manager dashboard and hotel ops: MANAGER only (ADMIN uses Admin UI, not Manager dashboard)
-    isManager: hasAny(user, ["MANAGER"]),
-    isAdmin: hasAny(user, ["ADMIN"]),
-    isCustomer: hasAny(user, ["CUSTOMER"]) && !hasAny(user, ["MANAGER", "ADMIN"]),
-    hasPermission: (permission) => user?.permissions?.includes(permission),
+    /** Staff who manage properties (backend uses permissions; this mirrors hotel:update). */
+    isManager: hasPermission("hotel:update"),
+    /** User administration (JWT must include user:manage). */
+    isAdmin: hasPermission("user:manage"),
+    /** Guest-oriented nav: not a hotel operator. */
+    isCustomer: !hasPermission("hotel:update"),
+    hasPermission,
     signIn,
     signUp,
     signOut,
@@ -64,10 +75,13 @@ function decodeUser(token) {
   try {
     const [, payload] = token.split(".");
     const decoded = JSON.parse(window.atob(payload.replace(/-/g, "+").replace(/_/g, "/")));
+    const rawAvatar = decoded.avatarUrl;
     return {
       id: decoded.id ?? null,
       username: decoded.sub,
       email: decoded.email ?? null,
+      avatarUrl:
+        typeof rawAvatar === "string" && rawAvatar.trim() !== "" ? rawAvatar.trim() : null,
       roles: decoded.roles || [],
       permissions: decoded.permissions || [],
       exp: decoded.exp,
@@ -75,8 +89,4 @@ function decodeUser(token) {
   } catch {
     return null;
   }
-}
-
-function hasAny(user, roles) {
-  return roles.some((role) => user?.roles?.includes(role));
 }

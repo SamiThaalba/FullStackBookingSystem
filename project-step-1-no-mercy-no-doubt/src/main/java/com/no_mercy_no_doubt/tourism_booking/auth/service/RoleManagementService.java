@@ -13,10 +13,12 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -47,11 +49,13 @@ public class RoleManagementService {
             throw new BusinessException("Role already exists.");
         }
 
-        Role role = roleRepository.save(Role.builder()
+        Role role = Role.builder()
                 .name(roleName)
                 .description(request.getDescription().trim())
-                .build());
-
+                .permissions(new LinkedHashSet<>())
+                .build();
+        role.setPermissions(resolvePermissionsByIds(request.getPermissionIds()));
+        role = roleRepository.save(role);
         return toRoleResponse(role);
     }
 
@@ -75,7 +79,10 @@ public class RoleManagementService {
         Role role = roleRepository.findById(roleId)
                 .orElseThrow(() -> new ResourceNotFoundException("Role", roleId));
 
-        role.setPermissions(resolvePermissions(request.getPermissionNames()));
+        Set<Long> ids = request.getPermissionIds() != null
+                ? request.getPermissionIds()
+                : Set.of();
+        role.setPermissions(resolvePermissionsByIds(ids));
         return toRoleResponse(roleRepository.save(role));
     }
 
@@ -129,6 +136,17 @@ public class RoleManagementService {
         return user.getRoles().stream().anyMatch(role -> role.getName().equals(normalizedRole));
     }
 
+    public boolean userHasPermission(AppUser user, String permissionName) {
+        for (Role role : user.getRoles()) {
+            for (Permission permission : role.getPermissions()) {
+                if (permission.getName().equals(permissionName)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     public UserResponse toUserResponse(AppUser user) {
         Set<String> roleNames = user.getRoles().stream()
                 .map(Role::getName)
@@ -143,28 +161,28 @@ public class RoleManagementService {
                 .id(user.getId())
                 .username(user.getUsername())
                 .email(user.getEmail())
+                .avatarUrl(user.getAvatarUrl())
                 .roles(roleNames)
                 .permissions(permissionNames)
                 .blocked(user.isBlocked())
                 .build();
     }
 
-    private Set<Permission> resolvePermissions(Set<String> permissionNames) {
-        Set<String> normalizedNames = permissionNames.stream()
-                .map(this::normalizePermission)
-                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
-
-        List<Permission> permissions = permissionRepository.findByNameIn(normalizedNames);
-
-        if (permissions.size() != normalizedNames.size()) {
-            Set<String> found = permissions.stream().map(Permission::getName).collect(java.util.stream.Collectors.toSet());
-            Set<String> missing = normalizedNames.stream()
-                    .filter(name -> !found.contains(name))
-                    .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
-            throw new BusinessException("Unknown permissions: " + String.join(", ", missing) + ".");
+    private Set<Permission> resolvePermissionsByIds(Collection<Long> permissionIds) {
+        if (permissionIds == null || permissionIds.isEmpty()) {
+            return new LinkedHashSet<>();
         }
-
-        return new LinkedHashSet<>(permissions);
+        Set<Long> uniqueIds = permissionIds.stream().collect(Collectors.toCollection(LinkedHashSet::new));
+        List<Permission> found = permissionRepository.findAllById(uniqueIds);
+        if (found.size() != uniqueIds.size()) {
+            Set<Long> foundIds = found.stream().map(Permission::getId).collect(Collectors.toSet());
+            String missing = uniqueIds.stream()
+                    .filter(id -> !foundIds.contains(id))
+                    .map(String::valueOf)
+                    .collect(Collectors.joining(", "));
+            throw new BusinessException("Unknown permission ids: " + missing + ".");
+        }
+        return new LinkedHashSet<>(found);
     }
 
     private RoleResponse toRoleResponse(Role role) {

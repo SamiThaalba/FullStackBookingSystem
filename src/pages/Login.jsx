@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import Alert from "../components/Alert";
@@ -9,6 +10,7 @@ import { clearBookingIntent, readBookingIntent } from "../auth/bookingIntent";
 export default function Login() {
   const { t } = useTranslation();
   const auth = useAuth();
+  const queryClient = useQueryClient();
   const navigate = useNavigate();
   const location = useLocation();
   const [form, setForm] = useState({ username: "", password: "" });
@@ -22,6 +24,8 @@ export default function Login() {
     setLoading(true);
     try {
       await auth.signIn(form);
+      queryClient.invalidateQueries({ queryKey: ["notifications-unread-count"] });
+      queryClient.invalidateQueries({ queryKey: ["notifications"] });
       const resumeFrom = location.state?.from || "/hotels";
       const intent = location.state?.intent || readBookingIntent();
       clearBookingIntent();

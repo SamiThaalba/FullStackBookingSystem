@@ -15,9 +15,8 @@ public record HotelPatchRequest(
 
         String address,
 
-        String city,
-
-        String country,
+        @Schema(description = "When set, updates hotel location to this city (and its country).")
+        Long cityId,
 
         Double latitude,
 

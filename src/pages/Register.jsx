@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router-dom";
 import Alert from "../components/Alert";
@@ -7,6 +8,7 @@ import { useAuth } from "../auth/AuthContext";
 export default function Register() {
   const { t } = useTranslation();
   const auth = useAuth();
+  const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [form, setForm] = useState({ username: "", email: "", password: "" });
   const [error, setError] = useState("");
@@ -18,6 +20,8 @@ export default function Register() {
     setLoading(true);
     try {
       await auth.signUp(form);
+      queryClient.invalidateQueries({ queryKey: ["notifications-unread-count"] });
+      queryClient.invalidateQueries({ queryKey: ["notifications"] });
       navigate("/hotels", { replace: true });
     } catch (err) {
       setError(err.message);

@@ -41,7 +41,7 @@ public class AnalyticsService {
     public ManagerDashboardResponse getManagerDashboard(Long managerId) {
         ensureCanAccessManagerDashboard(managerId);
 
-        List<Hotel> hotels = hotelRepository.findByManagerId(managerId);
+        List<Hotel> hotels = hotelRepository.findByOwnerIdOrManagerId(managerId);
 
         List<ManagerHotelSummaryResponse> hotelSummaries = hotels.stream()
                 .map(this::buildManagerHotelSummary)
@@ -226,11 +226,11 @@ public class AnalyticsService {
     private void ensureCanAccessManagerDashboard(Long managerId) {
         AppUser currentUser = currentUserProvider.getCurrentUser();
 
-        if (isAdmin(currentUser)) {
+        if (roleManagementService.userHasPermission(currentUser, "hotel:view_all")) {
             return;
         }
 
-        if (isManager(currentUser) && currentUser.getId().equals(managerId)) {
+        if (currentUser.getId().equals(managerId)) {
             return;
         }
 
@@ -240,23 +240,19 @@ public class AnalyticsService {
     private void ensureCanAccessHotel(Hotel hotel) {
         AppUser currentUser = currentUserProvider.getCurrentUser();
 
-        if (isAdmin(currentUser)) {
+        if (roleManagementService.userHasPermission(currentUser, "hotel:view_all")) {
             return;
         }
 
-        if (isManager(currentUser) && hotel.getManagerId() != null && hotel.getManagerId().equals(currentUser.getId())) {
+        if (hotel.getOwnerId() != null && hotel.getOwnerId().equals(currentUser.getId())) {
+            return;
+        }
+
+        if (hotel.getManagerId() != null && hotel.getManagerId().equals(currentUser.getId())) {
             return;
         }
 
         throw new AccessDeniedException("You are not allowed to access this hotel's analytics.");
-    }
-
-    private boolean isAdmin(AppUser user) {
-        return roleManagementService.userHasRole(user, "ADMIN");
-    }
-
-    private boolean isManager(AppUser user) {
-        return roleManagementService.userHasRole(user, "MANAGER");
     }
 
     private <T> long sumLong(List<T> values, Function<T, Long> extractor) {

@@ -1,7 +1,10 @@
 package com.no_mercy_no_doubt.tourism_booking.auth.controller;
 
+import com.no_mercy_no_doubt.tourism_booking.auth.dto.AuthResponse;
+import com.no_mercy_no_doubt.tourism_booking.auth.dto.AvatarUrlRequest;
 import com.no_mercy_no_doubt.tourism_booking.auth.dto.UiLanguageRequest;
 import com.no_mercy_no_doubt.tourism_booking.auth.service.AppUserService;
+import com.no_mercy_no_doubt.tourism_booking.auth.service.AuthService;
 import com.no_mercy_no_doubt.tourism_booking.auth.utils.SecurityUtils;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -20,6 +23,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class SelfProfileController {
 
     private final AppUserService userService;
+    private final AuthService authService;
 
     @PatchMapping("/ui-language")
     public ResponseEntity<Void> patchUiLanguage(@Valid @RequestBody UiLanguageRequest body) {
@@ -29,5 +33,15 @@ public class SelfProfileController {
         }
         userService.updatePreferredUiLanguage(username, body.language());
         return ResponseEntity.noContent().build();
+    }
+
+    @PatchMapping("/avatar")
+    public ResponseEntity<AuthResponse> patchAvatar(@Valid @RequestBody(required = false) AvatarUrlRequest body) {
+        String username = SecurityUtils.currentUsername();
+        if (username == null || username.isBlank()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+        String raw = body != null ? body.avatarUrl() : null;
+        return ResponseEntity.ok(authService.updateAvatarUrl(username, raw));
     }
 }

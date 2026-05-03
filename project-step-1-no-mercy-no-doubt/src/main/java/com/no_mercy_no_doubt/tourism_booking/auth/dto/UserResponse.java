@@ -11,6 +11,7 @@ public class UserResponse {
     private Long id;
     private String username;
     private String email;
+    private String avatarUrl;
     private Set<String> roles;
     private Set<String> permissions;
     private boolean blocked;

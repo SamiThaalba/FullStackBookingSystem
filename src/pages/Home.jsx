@@ -1,7 +1,14 @@
+import { lazy, Suspense, useMemo } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { useQuery } from "@tanstack/react-query";
 import SearchPanel from "../components/SearchPanel";
 import { useAuth } from "../auth/AuthContext";
+import { bookingApi } from "../api/bookingApi";
+import { hasValidHotelLatLng } from "../utils/geo";
+import { buildSearchCityRows } from "../utils/searchCities";
+
+const HotelsGoogleMap = lazy(() => import("../components/HotelsGoogleMap"));
 
 const WHY_CARDS = [
   { icon: "⚡", titleKey: "home.whyCardFastTitle", bodyKey: "home.whyCardFastBody" },
@@ -10,10 +17,40 @@ const WHY_CARDS = [
   { icon: "✓", titleKey: "home.whyCardTrustedTitle", bodyKey: "home.whyCardTrustedBody" },
 ];
 
+function HomeMapFallback() {
+  const { t } = useTranslation();
+  return (
+    <div className="home-map-fallback map-panel map-panel--placeholder map-panel--home" aria-hidden>
+      <p className="muted">{t("home.mapLoadingChunk")}</p>
+    </div>
+  );
+}
+
 export default function Home() {
   const { t, i18n } = useTranslation();
   const auth = useAuth();
   const isRtl = i18n.language?.startsWith("ar");
+
+  const hotelsQuery = useQuery({
+    queryKey: ["home", "hotels-for-map"],
+    queryFn: () => bookingApi.listHotels({ page: 0, size: 100 }),
+  });
+
+  const citiesQuery = useQuery({
+    queryKey: ["cities", "all"],
+    queryFn: () => bookingApi.listCities({}),
+    staleTime: 120_000,
+  });
+
+  const hotels = hotelsQuery.data?.content ?? [];
+  const searchCityRows = useMemo(
+    () => buildSearchCityRows(citiesQuery.data ?? [], hotels),
+    [citiesQuery.data, hotels],
+  );
+  const pinsOnMap = useMemo(
+    () => hotels.filter((h) => hasValidHotelLatLng(h?.latitude, h?.longitude)).length,
+    [hotels],
+  );
 
   return (
     <>
@@ -33,35 +70,50 @@ export default function Home() {
                   {t("home.login")}
                 </Link>
               )}
-              <a className="btn btn-outline" href="#about">
-                {t("home.aboutProject")}
+              <a className="btn btn-outline" href="#discover-map">
+                {t("home.mapCta")}
               </a>
             </div>
           </div>
           <div className="hero-card">
-            <SearchPanel />
+            <SearchPanel cities={searchCityRows} />
           </div>
         </div>
       </section>
 
-      <section className="container section" id="about">
-        <div className="section-heading">
-          <p className="eyebrow">{t("home.sectionEyebrow")}</p>
-          <h2>{t("home.sectionTitle")}</h2>
-        </div>
-        <div className="feature-grid">
-          <article className="feature-card">
-            <h3>{t("home.featureSearchTitle")}</h3>
-            <p>{t("home.featureSearchBody")}</p>
-          </article>
-          <article className="feature-card">
-            <h3>{t("home.featureBookingTitle")}</h3>
-            <p>{t("home.featureBookingBody")}</p>
-          </article>
-          <article className="feature-card">
-            <h3>{t("home.featureManagerTitle")}</h3>
-            <p>{t("home.featureManagerBody")}</p>
-          </article>
+      <section className="home-map-section" id="discover-map" aria-labelledby="home-map-heading">
+        <div className="container">
+          <div className="home-map-intro">
+            <div className="section-heading home-map-heading">
+              <p className="eyebrow">{t("home.mapEyebrow")}</p>
+              <h2 id="home-map-heading">{t("home.mapTitle")}</h2>
+              <p className="home-map-lead muted">{t("home.mapLead")}</p>
+            </div>
+            <div className="home-map-intro__aside">
+              <div className="home-map-stat" role="status">
+                <span className="home-map-stat__value">{pinsOnMap}</span>
+                <span className="home-map-stat__label">{t("home.mapStatLabel")}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="home-map-frame">
+            <div className="home-map-frame__glow" aria-hidden />
+            {hotelsQuery.isLoading ? (
+              <div className="home-map-fallback map-panel map-panel--placeholder map-panel--home">
+                <p className="muted">{t("hotels.loading")}</p>
+              </div>
+            ) : (
+              <Suspense fallback={<HomeMapFallback />}>
+                <HotelsGoogleMap hotels={hotels} variant="home" />
+              </Suspense>
+            )}
+            {hotelsQuery.error ? (
+              <p className="home-map-error muted" role="alert">
+                {hotelsQuery.error.message}
+              </p>
+            ) : null}
+          </div>
         </div>
       </section>
 

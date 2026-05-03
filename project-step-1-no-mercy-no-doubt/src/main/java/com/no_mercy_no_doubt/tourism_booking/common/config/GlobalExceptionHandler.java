@@ -81,7 +81,7 @@ public class GlobalExceptionHandler {
             body.put("error", "Validation Error");
 
             if ("role".equals(fieldName)) {
-                body.put("message", "Invalid role value. Allowed values: CUSTOMER, MANAGER, ADMIN.");
+                body.put("message", "Invalid role value. Use a role name that exists in the system (seed includes CUSTOMER, MANAGER, ADMIN, SUPER_ADMIN).");
             } else {
                 body.put("message", "Invalid value provided.");
             }

@@ -11,15 +11,17 @@ import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Component;
 
 /**
- * Sends a plain-text email when a wishlist alert triggers. Runs only when
- * {@link JavaMailSender} is available ({@code spring.mail.host} configured) and
- * {@code app.alert.email.enabled} is true (default).
+ * When a wishlist alert fires: persists an in-app notification for the user, then sends a
+ * plain-text email when {@link JavaMailSender} is available ({@code spring.mail.host} configured)
+ * and {@code app.alert.email.enabled} is true (default). Email is best-effort; in-app is always
+ * written first so the system shows the alert immediately.
  */
 @Component
 @RequiredArgsConstructor
 @Slf4j
 public class AlertEmailNotifier {
 
+    private final NotificationService notificationService;
     private final ObjectProvider<JavaMailSender> mailSender;
 
     @Value("${app.alert.email.enabled:true}")
@@ -27,6 +29,20 @@ public class AlertEmailNotifier {
 
     @Value("${app.mail.from:QuickReserve <noreply@quickreserve.local>}")
     private String mailFrom;
+
+    /**
+     * Saves the in-app notification, then attempts email delivery (skipped if mail is disabled
+     * or not configured).
+     */
+    public void notifyWishlistAlertTriggered(
+            AppUser user,
+            String inAppTitle,
+            String inAppMessage,
+            String emailSubject,
+            String plainEmailBody) {
+        notificationService.create(user, inAppTitle, inAppMessage);
+        sendTriggeredAlert(user, emailSubject, plainEmailBody);
+    }
 
     public void sendTriggeredAlert(AppUser user, String subject, String plainBody) {
         if (!emailEnabled) {

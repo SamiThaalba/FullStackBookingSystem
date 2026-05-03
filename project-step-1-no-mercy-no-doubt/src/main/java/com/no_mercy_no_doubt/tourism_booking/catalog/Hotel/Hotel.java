@@ -1,6 +1,7 @@
 package com.no_mercy_no_doubt.tourism_booking.catalog.Hotel;
 
 import com.no_mercy_no_doubt.tourism_booking.catalog.RoomType.RoomType;
+import com.no_mercy_no_doubt.tourism_booking.catalog.geography.City;
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -28,9 +29,10 @@ public class Hotel {
     @Column(nullable = false)
     private String address;
 
-    private String city;
-
-    private String country;
+    /** Canonical location: one city implies its country via {@link City#getCountry()}. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "city_id")
+    private City locatedCity;
 
     /** Decimal degrees WGS84; nullable for legacy rows until managers set coordinates. */
     private Double latitude;
@@ -45,7 +47,22 @@ public class Hotel {
     @Column(name = "manager_id")
     private Long managerId;
 
+    /** User who owns this hotel for access control (creator). SUPER_ADMIN uses {@code hotel:view_all} to bypass. */
+    @Column(name = "owner_id")
+    private Long ownerId;
+
     @OneToMany(mappedBy = "hotel", cascade = CascadeType.ALL, orphanRemoval = true)
     @Builder.Default
     private List<RoomType> roomTypes = new ArrayList<>();
+
+    public String getDisplayCity() {
+        return locatedCity != null ? locatedCity.getName() : "";
+    }
+
+    public String getDisplayCountry() {
+        if (locatedCity != null && locatedCity.getCountry() != null) {
+            return locatedCity.getCountry().getName();
+        }
+        return "";
+    }
 }

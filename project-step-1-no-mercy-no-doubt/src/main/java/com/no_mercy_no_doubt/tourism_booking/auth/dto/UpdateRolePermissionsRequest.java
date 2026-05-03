@@ -1,12 +1,13 @@
 package com.no_mercy_no_doubt.tourism_booking.auth.dto;
 
-import jakarta.validation.constraints.NotEmpty;
+import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 
+import java.util.LinkedHashSet;
 import java.util.Set;
 
 @Data
 public class UpdateRolePermissionsRequest {
-    @NotEmpty(message = "At least one permission must be selected.")
-    private Set<String> permissionNames;
+    @NotNull(message = "permissionIds is required (use empty array to clear all).")
+    private Set<Long> permissionIds = new LinkedHashSet<>();
 }

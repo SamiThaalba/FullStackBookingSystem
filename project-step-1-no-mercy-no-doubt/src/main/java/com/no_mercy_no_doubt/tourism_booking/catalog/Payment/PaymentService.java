@@ -64,7 +64,7 @@ public class PaymentService {
     private void ensureCanManagePaymentForBooking(Booking booking) {
         AppUser currentUser = currentUserProvider.getCurrentUser();
 
-        if (isAdmin(currentUser)) {
+        if (roleManagementService.userHasPermission(currentUser, "hotel:view_all")) {
             return;
         }
 
@@ -73,21 +73,12 @@ public class PaymentService {
         }
 
         Hotel hotel = hotelRepository.findById(booking.getHotelId()).orElse(null);
-        if (isManager(currentUser)
-                && hotel != null
-                && hotel.getManagerId() != null
-                && hotel.getManagerId().equals(currentUser.getId())) {
+        if (hotel != null
+                && ((hotel.getOwnerId() != null && hotel.getOwnerId().equals(currentUser.getId()))
+                || (hotel.getManagerId() != null && hotel.getManagerId().equals(currentUser.getId())))) {
             return;
         }
 
         throw new AccessDeniedException("You are not allowed to manage this booking payment.");
-    }
-
-    private boolean isAdmin(AppUser user) {
-        return roleManagementService.userHasRole(user, "ADMIN");
-    }
-
-    private boolean isManager(AppUser user) {
-        return roleManagementService.userHasRole(user, "MANAGER");
     }
 }

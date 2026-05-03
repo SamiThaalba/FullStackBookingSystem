@@ -2,6 +2,7 @@ package com.no_mercy_no_doubt.tourism_booking.catalog.Hotel;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
 import lombok.Data;
 
@@ -19,8 +20,10 @@ public class HotelRequest {
     @NotBlank(message = "Address is required.")
     private String address;
 
-    private String city;
-    private String country;
+    @NotNull(message = "City is required.")
+    @Positive(message = "City id must be greater than zero.")
+    @Schema(description = "Reference to a row in the cities table", requiredMode = Schema.RequiredMode.REQUIRED)
+    private Long cityId;
 
     /** Optional map pin (decimal degrees). */
     private Double latitude;

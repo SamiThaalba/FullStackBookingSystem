@@ -3,6 +3,8 @@ package com.no_mercy_no_doubt.tourism_booking.catalog.Hotel;
 import com.no_mercy_no_doubt.tourism_booking.auth.entity.AppUser;
 import com.no_mercy_no_doubt.tourism_booking.auth.repository.AppUserRepository;
 import com.no_mercy_no_doubt.tourism_booking.auth.service.RoleManagementService;
+import com.no_mercy_no_doubt.tourism_booking.catalog.geography.City;
+import com.no_mercy_no_doubt.tourism_booking.catalog.geography.CityRepository;
 import com.no_mercy_no_doubt.tourism_booking.common.dto.PageResponse;
 import com.no_mercy_no_doubt.tourism_booking.common.exception.BusinessException;
 import com.no_mercy_no_doubt.tourism_booking.common.exception.ResourceNotFoundException;
@@ -22,6 +24,7 @@ import java.util.List;
 public class HotelService {
 
     private final HotelRepository hotelRepository;
+    private final CityRepository cityRepository;
     private final CatalogMapper mapper;
     private final AppUserRepository userRepository;
     private final RoleManagementService roleManagementService;
@@ -29,37 +32,53 @@ public class HotelService {
 
     @Transactional
     public HotelResponse createHotel(HotelRequest request) {
+        AppUser currentUser = currentUserProvider.getCurrentUser();
+
+        if (request.getManagerId() == null
+                && !roleManagementService.userHasPermission(currentUser, "hotel:view_all")) {
+            request.setManagerId(currentUser.getId());
+        }
+
         validateManager(request.getManagerId());
 
         Hotel hotel = mapper.toEntity(request);
+        hotel.setOwnerId(currentUser.getId());
         hotel = hotelRepository.save(hotel);
         return mapper.toHotelResponse(hotel, false);
     }
 
     @Transactional
     public HotelResponse updateHotel(Long id, HotelRequest request) {
-        validateManager(request.getManagerId());
-
         Hotel hotel = hotelRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Hotel", id));
 
         ensureCanManageHotel(hotel);
         ensureManagerAssignmentAllowed(hotel, request.getManagerId());
+        validateManager(request.getManagerId());
 
         mapper.updateHotel(hotel, request);
         hotel = hotelRepository.save(hotel);
         return mapper.toHotelResponse(hotel, false);
     }
 
+    @Transactional(readOnly = true)
     public HotelResponse getHotelById(Long id) {
         Hotel hotel = hotelRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Hotel", id));
         return mapper.toHotelResponse(hotel, true);
     }
 
-    public PageResponse<HotelResponse> listHotelsWithFilters(String city, String country, String name, int page, int size) {
+    @Transactional(readOnly = true)
+    public PageResponse<HotelResponse> listHotelsWithFilters(String city, String country, String name,
+                                                             int page, int size) {
         Pageable pageable = PageRequest.of(page, size);
-        Page<Hotel> result = hotelRepository.findByFilters(city, country, name, pageable);
+        String cityParam = blankToNull(city);
+        String countryParam = blankToNull(country);
+        String nameParam = blankToNull(name);
+        String cityPattern = cityParam == null ? null : "%" + cityParam + "%";
+        String countryPattern = countryParam == null ? null : "%" + countryParam + "%";
+        String namePattern = nameParam == null ? null : "%" + nameParam + "%";
+        Page<Hotel> result = hotelRepository.findByFilters(cityPattern, countryPattern, namePattern, pageable);
 
         List<HotelResponse> content = result.getContent().stream()
                 .map(h -> mapper.toHotelResponse(h, false))
@@ -74,6 +93,20 @@ public class HotelService {
                 .first(result.isFirst())
                 .last(result.isLast())
                 .build();
+    }
+
+    @Transactional(readOnly = true)
+    public List<HotelResponse> getMyHotels() {
+        AppUser currentUser = currentUserProvider.getCurrentUser();
+        if (roleManagementService.userHasPermission(currentUser, "hotel:view_all")) {
+            return hotelRepository.findAll().stream()
+                    .map(h -> mapper.toHotelResponse(h, false))
+                    .toList();
+        }
+        return hotelRepository.findByOwnerIdOrManagerId(currentUser.getId())
+                .stream()
+                .map(h -> mapper.toHotelResponse(h, false))
+                .toList();
     }
 
     @Transactional
@@ -95,11 +128,10 @@ public class HotelService {
         if (request.address() != null) {
             hotel.setAddress(request.address().trim());
         }
-        if (request.city() != null) {
-            hotel.setCity(request.city().trim());
-        }
-        if (request.country() != null) {
-            hotel.setCountry(request.country().trim());
+        if (request.cityId() != null) {
+            City city = cityRepository.findById(request.cityId())
+                    .orElseThrow(() -> new ResourceNotFoundException("City", request.cityId()));
+            hotel.setLocatedCity(city);
         }
         if (request.latitude() != null) {
             hotel.setLatitude(request.latitude());
@@ -133,9 +165,7 @@ public class HotelService {
     }
 
     private void validateManager(Long managerId) {
-        if (managerId == null) {
-            return;
-        }
+        if (managerId == null) return;
 
         if (managerId <= 0) {
             throw new BusinessException("Manager ID must be greater than zero.");
@@ -152,13 +182,13 @@ public class HotelService {
     private void ensureCanManageHotel(Hotel hotel) {
         AppUser currentUser = currentUserProvider.getCurrentUser();
 
-        if (roleManagementService.userHasRole(currentUser, "ADMIN")) {
+        if (roleManagementService.userHasPermission(currentUser, "hotel:view_all")) {
             return;
         }
-
-        if (roleManagementService.userHasRole(currentUser, "MANAGER")
-                && hotel.getManagerId() != null
-                && hotel.getManagerId().equals(currentUser.getId())) {
+        if (hotel.getOwnerId() != null && hotel.getOwnerId().equals(currentUser.getId())) {
+            return;
+        }
+        if (hotel.getManagerId() != null && hotel.getManagerId().equals(currentUser.getId())) {
             return;
         }
 
@@ -166,27 +196,35 @@ public class HotelService {
     }
 
     private void ensureManagerAssignmentAllowed(Hotel existingHotel, Long requestedManagerId) {
-        if (requestedManagerId == null) {
-            return;
-        }
+        if (requestedManagerId == null) return;
 
         AppUser currentUser = currentUserProvider.getCurrentUser();
 
-        if (roleManagementService.userHasRole(currentUser, "ADMIN")) {
+        if (roleManagementService.userHasPermission(currentUser, "hotel:view_all")) {
             return;
         }
 
-        if (roleManagementService.userHasRole(currentUser, "MANAGER")) {
-            Long myId = currentUser.getId();
-
-            if (!requestedManagerId.equals(myId)) {
-                throw new AccessDeniedException("Managers can only assign themselves as manager.");
-            }
-
-            Long currentManagerId = existingHotel.getManagerId();
-            if (currentManagerId != null && !currentManagerId.equals(myId)) {
-                throw new AccessDeniedException("Managers cannot change the manager of a hotel.");
-            }
+        Long myId = currentUser.getId();
+        boolean isOwner = existingHotel.getOwnerId() != null && existingHotel.getOwnerId().equals(myId);
+        if (isOwner) {
+            return;
         }
+
+        if (!requestedManagerId.equals(myId)) {
+            throw new AccessDeniedException("You can only assign yourself as manager for this hotel.");
+        }
+
+        Long currentManagerId = existingHotel.getManagerId();
+        if (currentManagerId != null && !currentManagerId.equals(myId)) {
+            throw new AccessDeniedException("You cannot change the manager of a hotel you do not own.");
+        }
+    }
+
+    private static String blankToNull(String s) {
+        if (s == null) {
+            return null;
+        }
+        String t = s.trim();
+        return t.isEmpty() ? null : t;
     }
 }

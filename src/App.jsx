@@ -76,7 +76,7 @@ export default function App() {
         <Route
           path="dashboard"
           element={
-            <ProtectedRoute requireManager>
+            <ProtectedRoute requirePermission="hotel:update">
               <Dashboard />
             </ProtectedRoute>
           }

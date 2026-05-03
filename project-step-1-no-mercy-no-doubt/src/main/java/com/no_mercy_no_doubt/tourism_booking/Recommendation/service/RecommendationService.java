@@ -10,6 +10,7 @@ import com.no_mercy_no_doubt.tourism_booking.common.exception.BusinessException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.Collections;
@@ -31,6 +32,7 @@ public class RecommendationService {
     private final HotelRepository hotelRepository;
     private final RoomTypeRepository roomTypeRepository;
 
+    @Transactional(readOnly = true)
     public List<HotelRecommendationResponse> recommendHotels(
             String city,
             BigDecimal minPrice,
@@ -44,8 +46,9 @@ public class RecommendationService {
 
         Set<String> requestedAmenities = normalizeAmenities(amenities);
 
+        String cityPattern = (city == null || city.isBlank()) ? null : "%" + city.trim() + "%";
         List<Hotel> hotels = hotelRepository
-                .findByFilters(city, null, null, PageRequest.of(0, DEFAULT_FETCH_SIZE))
+                .findByFilters(cityPattern, null, null, PageRequest.of(0, DEFAULT_FETCH_SIZE))
                 .getContent();
 
         List<HotelRecommendationResponse> rankedResults = hotels.stream()
@@ -162,8 +165,8 @@ public class RecommendationService {
         return HotelRecommendationResponse.builder()
                 .hotelId(hotel.getId())
                 .hotelName(hotel.getName())
-                .city(hotel.getCity())
-                .country(hotel.getCountry())
+                .city(hotel.getDisplayCity())
+                .country(hotel.getDisplayCountry())
                 .score(score)
                 .matchingRoomCount(matchingRooms.size())
                 .maxCapacity(maxCapacity)
@@ -222,7 +225,7 @@ public class RecommendationService {
     ) {
         int score = 0;
 
-        if (city != null && hotel.getCity() != null && hotel.getCity().equalsIgnoreCase(city)) {
+        if (city != null && hotel.getDisplayCity() != null && hotel.getDisplayCity().equalsIgnoreCase(city)) {
             score += 40;
         }
 
@@ -369,7 +372,7 @@ public class RecommendationService {
         StringBuilder reason = new StringBuilder("Recommended because ");
         boolean added = false;
 
-        if (city != null && hotel.getCity() != null && hotel.getCity().equalsIgnoreCase(city)) {
+        if (city != null && hotel.getDisplayCity() != null && hotel.getDisplayCity().equalsIgnoreCase(city)) {
             reason.append("it matches the requested city");
             added = true;
         }

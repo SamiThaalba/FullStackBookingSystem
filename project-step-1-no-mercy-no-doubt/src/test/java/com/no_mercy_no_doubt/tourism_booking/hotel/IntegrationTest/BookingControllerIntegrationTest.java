@@ -8,6 +8,8 @@ import com.no_mercy_no_doubt.tourism_booking.catalog.Booking.BookingRepository;
 import com.no_mercy_no_doubt.tourism_booking.catalog.Booking.BookingStatus;
 import com.no_mercy_no_doubt.tourism_booking.catalog.Hotel.Hotel;
 import com.no_mercy_no_doubt.tourism_booking.catalog.Hotel.HotelRepository;
+import com.no_mercy_no_doubt.tourism_booking.catalog.geography.City;
+import com.no_mercy_no_doubt.tourism_booking.catalog.geography.CityRepository;
 import com.no_mercy_no_doubt.tourism_booking.catalog.RoomType.RoomType;
 import com.no_mercy_no_doubt.tourism_booking.catalog.RoomType.RoomTypeRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -47,6 +49,9 @@ class BookingControllerIntegrationTest {
     private HotelRepository hotelRepository;
 
     @Autowired
+    private CityRepository cityRepository;
+
+    @Autowired
     private RoomTypeRepository roomTypeRepository;
 
     @Autowired
@@ -80,11 +85,13 @@ class BookingControllerIntegrationTest {
                 .build();
         guest = appUserRepository.save(guest);
 
+        City bethlehem = cityRepository.findFirstByNameIgnoreCase("Bethlehem")
+                .orElseThrow(() -> new IllegalStateException("Expected seeded city Bethlehem for tests"));
+
         hotel = Hotel.builder()
                 .name("Test Hotel")
                 .address("Main Street")
-                .city("Bethlehem")
-                .country("Palestine")
+                .locatedCity(bethlehem)
                 .managerId(99L)
                 .build();
         hotel = hotelRepository.save(hotel);

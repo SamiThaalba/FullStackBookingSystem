@@ -44,4 +44,8 @@ public class AppUser {
     @Builder.Default
     @Column(name = "preferred_ui_language", length = 8)
     private String preferredUiLanguage = "en";
+
+    /** Public HTTPS URL from Supabase Storage (or null). */
+    @Column(name = "avatar_url", length = 2048)
+    private String avatarUrl;
 }

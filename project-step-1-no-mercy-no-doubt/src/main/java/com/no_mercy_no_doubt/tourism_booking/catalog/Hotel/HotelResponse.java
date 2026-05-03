@@ -20,11 +20,13 @@ public class HotelResponse {
     private String name;
     private String description;
     private String address;
+    private Long cityId;
     private String city;
     private String country;
     private String phone;
     private String email;
     private Long managerId;
+    private Long ownerId;
     private String imageUrl;
     private Double latitude;
     private Double longitude;

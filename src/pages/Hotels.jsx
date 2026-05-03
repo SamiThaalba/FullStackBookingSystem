@@ -1,26 +1,19 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, Navigate, useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { bookingApi } from "../api/bookingApi";
-import { useAuth } from "../auth/AuthContext";
+import { buildSearchCityRows } from "../utils/searchCities";
 import Alert from "../components/Alert";
 import HotelCard from "../components/HotelCard";
 import SearchPanel from "../components/SearchPanel";
-
-/** Typical seed country for this project; merged with values returned from `/api/hotels`. */
-const DEFAULT_COUNTRY_FILTERS = ["Palestine"];
-
+import { FaMapMarkerAlt } from "react-icons/fa";
+import { FaMap } from "react-icons/fa6";
 export default function Hotels() {
   const { t } = useTranslation();
-  const auth = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const page = Number(searchParams.get("page") || 0) || 0;
   const country = searchParams.get("country") || "";
-
-  if (auth.isAuthenticated && !auth.isCustomer) {
-    return <Navigate to={auth.isAdmin ? "/admin/roles" : "/dashboard"} replace />;
-  }
 
   const filters = useMemo(
     () => ({
@@ -38,27 +31,36 @@ export default function Hotels() {
     queryFn: () => bookingApi.listHotels(filters),
   });
 
+  const countriesQuery = useQuery({
+    queryKey: ["countries"],
+    queryFn: bookingApi.listCountries,
+    staleTime: 120_000,
+  });
+
+  const citiesQuery = useQuery({
+    queryKey: ["cities", "all"],
+    queryFn: () => bookingApi.listCities({}),
+    staleTime: 120_000,
+  });
+
   const hotels = hotelsQuery.data?.content || [];
   const queryString = searchParams.toString();
   const mapHref = queryString ? `/hotels/map?${queryString}` : "/hotels/map";
 
-  const cityOptions = useMemo(() => {
-    const unique = new Set();
-    hotels.forEach((hotel) => {
-      if (hotel?.city) unique.add(hotel.city);
-    });
-    return Array.from(unique).sort((a, b) => a.localeCompare(b));
-  }, [hotels]);
+  const searchCityRows = useMemo(
+    () => buildSearchCityRows(citiesQuery.data ?? [], hotels),
+    [citiesQuery.data, hotels],
+  );
 
   const countryOptions = useMemo(() => {
-    const unique = new Set(DEFAULT_COUNTRY_FILTERS);
+    const unique = new Set((countriesQuery.data ?? []).map((c) => c.name));
     hotels.forEach((hotel) => {
       const c = hotel?.country?.trim();
       if (c) unique.add(c);
     });
     if (country) unique.add(country.trim());
     return Array.from(unique).sort((a, b) => a.localeCompare(b));
-  }, [hotels, country]);
+  }, [countriesQuery.data, hotels, country]);
 
   function changePage(nextPage) {
     const next = new URLSearchParams(searchParams);
@@ -87,7 +89,7 @@ export default function Hotels() {
           rooms: searchParams.get("rooms") || 1,
           work: searchParams.get("work") === "1",
         }}
-        cityOptions={cityOptions}
+        cities={searchCityRows}
       />
 
       <div className="results-toolbar">
@@ -107,12 +109,14 @@ export default function Hotels() {
             </option>
           ))}
         </select>
-        <Link className="filter-button" to={mapHref}>
-          {t("hotels.mapView")}
+        <Link className="btn btn-teal" to={mapHref} aria-label={t("hotels.mapView")}>
+          <FaMap size={40} />
         </Link>
       </div>
 
-      <Alert type="error">{hotelsQuery.error?.message}</Alert>
+      <Alert type="error">
+        {hotelsQuery.error?.message || countriesQuery.error?.message || citiesQuery.error?.message}
+      </Alert>
 
       {hotelsQuery.isLoading ? (
         <div className="empty-state">{t("hotels.loading")}</div>
@@ -129,22 +133,19 @@ export default function Hotels() {
         </div>
       )}
 
-      {hotelsQuery.data && (
-        <div className="pagination">
-          <button disabled={hotelsQuery.data.first} onClick={() => changePage(page - 1)}>
+      {hotelsQuery.data && hotelsQuery.data.totalPages > 1 ? (
+        <div className="pager">
+          <button type="button" className="btn btn-outline" disabled={hotelsQuery.data.first} onClick={() => changePage(page - 1)}>
             {t("hotels.previous")}
           </button>
-          <span>
-            {t("hotels.pageOf", {
-              page: hotelsQuery.data.page + 1,
-              total: Math.max(hotelsQuery.data.totalPages, 1),
-            })}
+          <span className="muted">
+            {t("hotels.pageOf", { page: page + 1, total: hotelsQuery.data.totalPages })}
           </span>
-          <button disabled={hotelsQuery.data.last} onClick={() => changePage(page + 1)}>
+          <button type="button" className="btn btn-outline" disabled={hotelsQuery.data.last} onClick={() => changePage(page + 1)}>
             {t("hotels.next")}
           </button>
         </div>
-      )}
+      ) : null}
     </section>
   );
 }

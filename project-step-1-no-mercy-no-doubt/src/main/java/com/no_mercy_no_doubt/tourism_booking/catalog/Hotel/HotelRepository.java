@@ -12,29 +12,39 @@ public interface HotelRepository extends JpaRepository<Hotel, Long> {
 
     List<Hotel> findByManagerId(Long managerId);
 
+    List<Hotel> findByOwnerId(Long ownerId);
+
+    @Query("SELECT h FROM Hotel h WHERE h.ownerId = :userId OR h.managerId = :userId")
+    List<Hotel> findByOwnerIdOrManagerId(@Param("userId") Long userId);
+
+    /**
+     * Filter by city/country through normalized tables only.
+     * Patterns are pre-wrapped with {@code %} in Java ({@link HotelService#listHotelsWithFilters}).
+     * {@code CAST(... AS string)} forces text in SQL: some PostgreSQL schemas still store these
+     * {@code name} columns as {@code bytea}; {@code lower(bytea)} is invalid without a cast.
+     */
     @Query(
             value = """
-            SELECT *
-            FROM hotels h
-            WHERE (:city IS NULL OR h.city ILIKE CAST(:city AS text))
-              AND (:country IS NULL OR h.country ILIKE CAST(:country AS text))
-              AND (:name IS NULL OR h.name ILIKE CONCAT('%', CAST(:name AS text), '%'))
-            """,
+                    SELECT h FROM Hotel h
+                    LEFT JOIN h.locatedCity c
+                    LEFT JOIN c.country co
+                    WHERE (:cityPattern IS NULL OR (c IS NOT NULL AND LOWER(CAST(c.name AS string)) LIKE LOWER(CAST(:cityPattern AS string))))
+                      AND (:countryPattern IS NULL OR (co IS NOT NULL AND LOWER(CAST(co.name AS string)) LIKE LOWER(CAST(:countryPattern AS string))))
+                      AND (:namePattern IS NULL OR LOWER(CAST(h.name AS string)) LIKE LOWER(CAST(:namePattern AS string)))
+                    """,
             countQuery = """
-            SELECT COUNT(*)
-            FROM hotels h
-            WHERE (:city IS NULL OR h.city ILIKE CAST(:city AS text))
-              AND (:country IS NULL OR h.country ILIKE CAST(:country AS text))
-              AND (:name IS NULL OR h.name ILIKE CONCAT('%', CAST(:name AS text), '%'))
-            """,
-            nativeQuery = true
+                    SELECT COUNT(h) FROM Hotel h
+                    LEFT JOIN h.locatedCity c
+                    LEFT JOIN c.country co
+                    WHERE (:cityPattern IS NULL OR (c IS NOT NULL AND LOWER(CAST(c.name AS string)) LIKE LOWER(CAST(:cityPattern AS string))))
+                      AND (:countryPattern IS NULL OR (co IS NOT NULL AND LOWER(CAST(co.name AS string)) LIKE LOWER(CAST(:countryPattern AS string))))
+                      AND (:namePattern IS NULL OR LOWER(CAST(h.name AS string)) LIKE LOWER(CAST(:namePattern AS string)))
+                    """
     )
-
     Page<Hotel> findByFilters(
-            @Param("city") String city,
-            @Param("country") String country,
-            @Param("name") String name,
+            @Param("cityPattern") String cityPattern,
+            @Param("countryPattern") String countryPattern,
+            @Param("namePattern") String namePattern,
             Pageable pageable
     );
-
 }

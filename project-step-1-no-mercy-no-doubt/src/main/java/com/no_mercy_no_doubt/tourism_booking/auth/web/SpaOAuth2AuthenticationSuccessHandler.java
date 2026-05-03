@@ -29,7 +29,8 @@ public class SpaOAuth2AuthenticationSuccessHandler implements AuthenticationSucc
             Authentication authentication) throws IOException, ServletException {
         OAuth2User oauthUser = (OAuth2User) authentication.getPrincipal();
         String email = oauthUser.getAttribute("email");
-        AuthResponse tokens = authService.loginOrRegisterFromGoogleOAuth(email);
+        String displayName = this.extractGoogleDisplayName(oauthUser);
+        AuthResponse tokens = authService.loginOrRegisterFromGoogleOAuth(email, displayName);
 
         String from = (String) request.getSession().getAttribute(OAuth2FromSessionFilter.SESSION_ATTR_FROM);
         if (from == null || from.isBlank()) {
@@ -48,5 +49,29 @@ public class SpaOAuth2AuthenticationSuccessHandler implements AuthenticationSucc
                 .toUriString();
 
         response.sendRedirect(redirect);
+    }
+
+    /**
+     * Google typically sends {@code name}; otherwise combine {@code given_name} and {@code family_name}.
+     */
+    private String extractGoogleDisplayName(OAuth2User oauthUser) {
+        String name = oauthUser.getAttribute("name");
+        if (name != null && !name.isBlank()) {
+            return name.trim();
+        }
+        String given = oauthUser.getAttribute("given_name");
+        String family = oauthUser.getAttribute("family_name");
+        StringBuilder sb = new StringBuilder();
+        if (given != null && !given.isBlank()) {
+            sb.append(given.trim());
+        }
+        if (family != null && !family.isBlank()) {
+            if (sb.length() > 0) {
+                sb.append(' ');
+            }
+            sb.append(family.trim());
+        }
+        String combined = sb.toString().trim();
+        return combined.isEmpty() ? null : combined;
     }
 }

@@ -7,7 +7,7 @@ import { useHotelWishlistToggle } from "../hooks/useHotelWishlistToggle";
 export default function HotelCard({ hotel }) {
   const { t } = useTranslation();
   const auth = useAuth();
-  const canSave = auth.isAuthenticated && auth.isCustomer;
+  const canSave = auth.isAuthenticated && auth.hasPermission("wishlist:manage");
   const { isInWishlist, toggleMutation } = useHotelWishlistToggle(hotel, canSave);
 
   return (

@@ -58,7 +58,7 @@ class RoleManagementControllerTest {
         request.setDescription("manager role");
 
         Mockito.when(roleManagementService.createRole(Mockito.any(CreateRoleRequest.class)))
-                .thenReturn(RoleResponse.builder().id(2L).name("MANAGER").description("manager role").build());
+                .thenReturn(RoleResponse.builder().id(2L).name("MANAGER").description("manager role").permissions(java.util.Set.of("hotel:view")).build());
 
         mockMvc.perform(post("/api/admin/roles")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -70,16 +70,16 @@ class RoleManagementControllerTest {
     @Test
     void replaceRolePermissions_returnsUpdatedRole() throws Exception {
         UpdateRolePermissionsRequest request = new UpdateRolePermissionsRequest();
-        request.setPermissionNames(Set.of("booking:view"));
+        request.setPermissionIds(Set.of(5L, 7L));
 
         Mockito.when(roleManagementService.replaceRolePermissions(Mockito.eq(2L), Mockito.any(UpdateRolePermissionsRequest.class)))
-                .thenReturn(RoleResponse.builder().id(2L).name("MANAGER").permissions(Set.of("booking:view")).build());
+                .thenReturn(RoleResponse.builder().id(2L).name("MANAGER").permissions(Set.of("booking:view", "hotel:view")).build());
 
         mockMvc.perform(put("/api/admin/roles/2/permissions")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.permissions[0]").value("booking:view"));
+                .andExpect(jsonPath("$.permissions.length()").value(2));
     }
 
     @Test

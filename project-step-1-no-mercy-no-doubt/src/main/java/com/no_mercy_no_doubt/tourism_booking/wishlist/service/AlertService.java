@@ -6,7 +6,6 @@ import com.no_mercy_no_doubt.tourism_booking.catalog.RoomType.RoomType;
 import com.no_mercy_no_doubt.tourism_booking.catalog.RoomType.RoomTypeRepository;
 import com.no_mercy_no_doubt.tourism_booking.common.utils.CurrentUserProvider;
 import com.no_mercy_no_doubt.tourism_booking.notification.service.AlertEmailNotifier;
-import com.no_mercy_no_doubt.tourism_booking.notification.service.NotificationService;
 import com.no_mercy_no_doubt.tourism_booking.wishlist.dto.AlertResponse;
 import com.no_mercy_no_doubt.tourism_booking.wishlist.dto.CreateAlertRequest;
 import com.no_mercy_no_doubt.tourism_booking.wishlist.entity.PriceAvailabilityAlert;
@@ -35,7 +34,6 @@ public class AlertService {
     private final RoomTypeRepository roomTypeRepository;
     private final BookingRepository bookingRepository;
     private final CurrentUserProvider currentUserProvider;
-    private final NotificationService notificationService;
     private final AlertEmailNotifier alertEmailNotifier;
 
     @Qualifier("wishlistRequiresNewTransactionTemplate")
@@ -237,9 +235,12 @@ public class AlertService {
 
         WishlistTriggeredAlertVariants.NotificationPair inApp =
                 variants.notificationFor(alert.getUser());
-        notificationService.create(alert.getUser(), inApp.title(), inApp.message());
-        alertEmailNotifier.sendTriggeredAlert(
-                alert.getUser(), variants.emailSubject(), variants.emailBody());
+        alertEmailNotifier.notifyWishlistAlertTriggered(
+                alert.getUser(),
+                inApp.title(),
+                inApp.message(),
+                variants.emailSubject(),
+                variants.emailBody());
     }
 
     private AlertResponse toResponse(PriceAvailabilityAlert alert) {

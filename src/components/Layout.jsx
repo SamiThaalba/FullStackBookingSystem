@@ -1,10 +1,13 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
+import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "../auth/AuthContext";
 import { bookingApi } from "../api/bookingApi";
 import I18nHtmlAttributes from "./I18nHtmlAttributes";
 import LanguageSwitcher from "./LanguageSwitcher";
+import NotificationBellIcon from "./NotificationBellIcon";
+import NotificationSlideIn from "./NotificationSlideIn";
 import ThemeToggle from "./ThemeToggle";
 
 export default function Layout() {
@@ -12,13 +15,29 @@ export default function Layout() {
   const auth = useAuth();
   const navigate = useNavigate();
 
+  const notificationsNavEnabled =
+    auth.isAuthenticated && auth.hasPermission("notification:view");
+
+  const unreadNotificationsQuery = useQuery({
+    queryKey: ["notifications-unread-count"],
+    queryFn: bookingApi.unreadNotificationCount,
+    enabled: notificationsNavEnabled,
+    refetchInterval: 8_000,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
+    staleTime: 4_000,
+  });
+
+  const unreadCount = Number(unreadNotificationsQuery.data?.unreadCount ?? 0) || 0;
+  const showUnreadDot = notificationsNavEnabled && unreadCount > 0;
+
   useEffect(() => {
     if (!auth.isAuthenticated || !i18n.isInitialized) return;
     const code =
       typeof i18n.language === "string"
         ? i18n.language.split("-")[0]
         : "en";
-    bookingApi.syncUiLanguage(code || "en").catch(() => {});
+    bookingApi.syncUiLanguage(code || "en").catch(() => { });
   }, [auth.isAuthenticated, i18n.isInitialized, i18n.language]);
 
   async function handleLogout() {
@@ -29,6 +48,7 @@ export default function Layout() {
   return (
     <div className="app-shell">
       <I18nHtmlAttributes />
+      <NotificationSlideIn enabled={notificationsNavEnabled} />
       <header className="site-header">
         <nav className="nav container">
           <NavLink to="/" className="brand" aria-label={t("layout.brandAria")}>
@@ -37,9 +57,11 @@ export default function Layout() {
           </NavLink>
 
           <div className="nav-links">
-            {!auth.isAuthenticated || auth.isCustomer ? <NavLink to="/hotels">{t("layout.discover")}</NavLink> : null}
-            {auth.isAuthenticated && auth.isCustomer ? <NavLink to="/my-bookings">{t("layout.myBookings")}</NavLink> : null}
-            {auth.isManager && <NavLink to="/dashboard">{t("layout.manager")}</NavLink>}
+            <NavLink to="/hotels">{t("layout.discover")}</NavLink>
+            {auth.isAuthenticated && auth.hasPermission("booking:view") && !auth.hasPermission("hotel:update") ? (
+              <NavLink to="/my-bookings">{t("layout.myBookings")}</NavLink>
+            ) : null}
+            {auth.hasPermission("hotel:update") && <NavLink to="/dashboard">{t("layout.manager")}</NavLink>}
             {auth.hasPermission("role:manage") && <NavLink to="/admin/roles">{t("layout.admin")}</NavLink>}
           </div>
 
@@ -48,14 +70,41 @@ export default function Layout() {
             <LanguageSwitcher />
             {auth.isAuthenticated ? (
               <>
-                <NavLink className="user-pill" to="/profile">
-                  {auth.user?.username}
-                </NavLink>
                 {auth.hasPermission("notification:view") && (
-                  <NavLink className="btn btn-small btn-outline" to="/notifications">
-                    {t("layout.notifications")}
-                  </NavLink>
+                  <span className="nav-badge-wrap">
+                    <NavLink
+                      className="btn btn-small btn-outline nav-notifications-btn"
+                      to="/notifications"
+                      aria-label={
+                        showUnreadDot
+                          ? t("layout.notificationsAriaUnread", { count: unreadCount })
+                          : t("layout.notifications")
+                      }
+                    >
+                      <NotificationBellIcon size={20} />
+                    </NavLink>
+                    {showUnreadDot ? (
+                      <span
+                        className="nav-badge-dot"
+                        title={t("layout.notificationsUnreadTitle", { count: unreadCount })}
+                        aria-hidden
+                      />
+                    ) : null}
+                  </span>
                 )}
+                    <NavLink className="user-pill" to="/profile">
+                      <span className="user-pill__text">
+                        <span className="user-pill__name">{auth.user?.username ?? auth.user?.email ?? "—"}</span>
+                        <span className="user-pill__sub">{t("layout.myProfile")}</span>
+                      </span>
+                      <span className="user-pill__avatar" aria-hidden>
+                        {auth.user?.avatarUrl ? (
+                          <img className="user-pill__avatar-img" src={auth.user.avatarUrl} alt="" />
+                        ) : (
+                          (auth.user?.username || auth.user?.email || "?").trim().charAt(0).toUpperCase()
+                        )}
+                      </span>
+                    </NavLink>
                 <button className="btn btn-small btn-outline" onClick={handleLogout}>
                   {t("layout.logOut")}
                 </button>

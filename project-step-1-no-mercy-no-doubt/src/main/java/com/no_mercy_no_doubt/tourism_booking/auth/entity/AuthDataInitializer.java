@@ -7,6 +7,7 @@ import com.no_mercy_no_doubt.tourism_booking.common.exception.BusinessException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
+import org.springframework.core.annotation.Order;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 
@@ -16,6 +17,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 @Component
+@Order(20)
 @RequiredArgsConstructor
 public class AuthDataInitializer implements CommandLineRunner {
 
@@ -23,8 +25,10 @@ public class AuthDataInitializer implements CommandLineRunner {
     private final PermissionRepository permissionRepository;
     private final AppUserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
+
     @Value("${app.admin.bootstrap-enabled:false}")
     private boolean adminBootstrapEnabled;
+
     @Value("${app.admin.username:admin}")
     private String adminUsername;
 
@@ -47,6 +51,7 @@ public class AuthDataInitializer implements CommandLineRunner {
         permissions.put("hotel:view", "View hotels");
         permissions.put("hotel:update", "Update hotels");
         permissions.put("hotel:delete", "Delete hotels");
+        permissions.put("hotel:view_all", "List and manage all hotels (platform operator)");
 
         permissions.put("room:create", "Create room types");
         permissions.put("room:view", "View room types");
@@ -72,25 +77,24 @@ public class AuthDataInitializer implements CommandLineRunner {
         permissions.put("user:manage", "Manage users");
         permissions.put("role:manage", "Manage roles and permissions");
 
-        permissions.forEach((name, description) -> {
-            permissionRepository.findByName(name).orElseGet(() ->
-                    permissionRepository.save(Permission.builder()
-                            .name(name)
-                            .description(description)
-                            .build())
-            );
-        });
+        permissions.forEach((name, description) ->
+                permissionRepository.findByName(name).orElseGet(() ->
+                        permissionRepository.save(Permission.builder()
+                                .name(name)
+                                .description(description)
+                                .build())
+                )
+        );
     }
 
     private void seedRoles() {
-        // Roles/permissions must exist even if admin bootstrap is disabled,
-        // because registration assigns the CUSTOMER role.
-        if (adminUsername == null || adminUsername.isBlank()
-                || adminEmail == null || adminEmail.isBlank()
-                || adminPassword == null || adminPassword.isBlank()) {
-            // Still seed roles; only admin user creation depends on these values.
-        }
-        createOrUpdateRole("ADMIN", "System administrator", Set.of(
+        Set<String> allPermissionNames = permissionRepository.findAll().stream()
+                .map(Permission::getName)
+                .collect(Collectors.toCollection(java.util.TreeSet::new));
+
+        createOrUpdateRole("SUPER_ADMIN", "Full platform access", allPermissionNames);
+
+        createOrUpdateRole("ADMIN", "System administrator (scoped to own hotels)", Set.of(
                 "hotel:create", "hotel:view", "hotel:update", "hotel:delete",
                 "room:create", "room:view", "room:update", "room:delete",
                 "availability:view", "recommendation:view", "analytics:view",
@@ -100,11 +104,13 @@ public class AuthDataInitializer implements CommandLineRunner {
                 "user:manage", "role:manage"
         ));
 
+        // FIX: Added hotel:create, hotel:delete, room:delete, booking:cancel
+        // so managers can fully manage their own hotels and rooms.
         createOrUpdateRole("MANAGER", "Hotel manager", Set.of(
-                "hotel:view", "hotel:update",
-                "room:view", "room:create", "room:update",
+                "hotel:create", "hotel:view", "hotel:update", "hotel:delete",
+                "room:create", "room:view", "room:update", "room:delete",
                 "availability:view", "recommendation:view", "analytics:view",
-                "booking:view", "booking:update",
+                "booking:view", "booking:update", "booking:cancel",
                 "payment:view", "payment:update", "notification:view"
         ));
 
@@ -134,6 +140,7 @@ public class AuthDataInitializer implements CommandLineRunner {
         if (!adminBootstrapEnabled) {
             return;
         }
+
         Role adminRole = roleRepository.findByName("ADMIN")
                 .orElseThrow(() -> new BusinessException("ADMIN role was not found."));
 

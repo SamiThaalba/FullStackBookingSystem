@@ -1,69 +1,100 @@
 import { useQuery } from "@tanstack/react-query";
 import { lazy, Suspense, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, Navigate, useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { bookingApi } from "../api/bookingApi";
-import { useAuth } from "../auth/AuthContext";
+import { buildSearchCityRows } from "../utils/searchCities";
 import Alert from "../components/Alert";
 import SearchPanel from "../components/SearchPanel";
-
+import { FaListUl } from "react-icons/fa";
 const HotelsGoogleMap = lazy(() => import("../components/HotelsGoogleMap"));
 
-const DEFAULT_COUNTRY_FILTERS = ["Palestine"];
+/** Page size per request when loading every hotel that matches the map filters (not the list UI page). */
+const MAP_LIST_PAGE_SIZE = 200;
+
+async function fetchAllHotelsMatchingFilters(filterFields) {
+  const merged = [];
+  let pageIdx = 0;
+  let totalPages = 1;
+  while (pageIdx < totalPages && pageIdx < 100) {
+    const res = await bookingApi.listHotels({
+      ...filterFields,
+      page: pageIdx,
+      size: MAP_LIST_PAGE_SIZE,
+    });
+    merged.push(...(res.content || []));
+    totalPages = Math.max(res.totalPages ?? 1, 1);
+    if (res.last) break;
+    pageIdx += 1;
+  }
+  return {
+    content: merged,
+    page: 0,
+    size: merged.length,
+    totalElements: merged.length,
+    totalPages: 1,
+    first: true,
+    last: true,
+  };
+}
 
 export default function HotelsMap() {
   const { t } = useTranslation();
-  const auth = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
-  const page = Number(searchParams.get("page") || 0) || 0;
   const country = searchParams.get("country") || "";
 
-  if (auth.isAuthenticated && !auth.isCustomer) {
-    return <Navigate to={auth.isAdmin ? "/admin/roles" : "/dashboard"} replace />;
-  }
-
-  const filters = useMemo(
+  const filterFields = useMemo(
     () => ({
-      page,
-      size: 50,
       city: searchParams.get("city") || "",
       country,
       name: searchParams.get("name") || "",
     }),
-    [country, page, searchParams],
+    [country, searchParams],
   );
 
   const hotelsQuery = useQuery({
-    queryKey: ["hotels-map", filters],
-    queryFn: () => bookingApi.listHotels(filters),
+    queryKey: ["hotels-map", filterFields],
+    queryFn: () => fetchAllHotelsMatchingFilters(filterFields),
+  });
+
+  const countriesQuery = useQuery({
+    queryKey: ["countries"],
+    queryFn: bookingApi.listCountries,
+    staleTime: 120_000,
+  });
+
+  const citiesQuery = useQuery({
+    queryKey: ["cities", "all"],
+    queryFn: () => bookingApi.listCities({}),
+    staleTime: 120_000,
   });
 
   const hotels = hotelsQuery.data?.content || [];
   const queryString = searchParams.toString();
 
-  const cityOptions = useMemo(() => {
-    const unique = new Set();
-    hotels.forEach((hotel) => {
-      if (hotel?.city) unique.add(hotel.city);
-    });
-    return Array.from(unique).sort((a, b) => a.localeCompare(b));
-  }, [hotels]);
+  const detailBookingQuery = useMemo(() => {
+    const q = new URLSearchParams();
+    for (const key of ["from", "to", "guests", "adults", "children", "rooms", "work"]) {
+      const v = searchParams.get(key);
+      if (v != null && v !== "") q.set(key, v);
+    }
+    return q.toString();
+  }, [searchParams]);
+
+  const searchCityRows = useMemo(
+    () => buildSearchCityRows(citiesQuery.data ?? [], hotels),
+    [citiesQuery.data, hotels],
+  );
 
   const countryOptions = useMemo(() => {
-    const unique = new Set(DEFAULT_COUNTRY_FILTERS);
+    const unique = new Set((countriesQuery.data ?? []).map((c) => c.name));
     hotels.forEach((hotel) => {
       const c = hotel?.country?.trim();
       if (c) unique.add(c);
     });
     if (country) unique.add(country.trim());
     return Array.from(unique).sort((a, b) => a.localeCompare(b));
-  }, [hotels, country]);
-
-  function changePage(nextPage) {
-    const next = new URLSearchParams(searchParams);
-    next.set("page", String(nextPage));
-    setSearchParams(next);
-  }
+  }, [countriesQuery.data, hotels, country]);
 
   function setCountryFilter(value) {
     const next = new URLSearchParams(searchParams);
@@ -95,7 +126,7 @@ export default function HotelsMap() {
           rooms: searchParams.get("rooms") || 1,
           work: searchParams.get("work") === "1",
         }}
-        cityOptions={cityOptions}
+        cities={searchCityRows}
       />
 
       <div className="results-toolbar">
@@ -115,12 +146,14 @@ export default function HotelsMap() {
             </option>
           ))}
         </select>
-        <Link className="filter-button" to={listHref}>
-          {t("hotels.listView")}
+        <Link className="btn btn-teal" to={listHref} aria-label={t("hotels.listView")}>
+          <FaListUl size={20} />
         </Link>
       </div>
 
-      <Alert type="error">{hotelsQuery.error?.message}</Alert>
+      <Alert type="error">
+        {hotelsQuery.error?.message || countriesQuery.error?.message || citiesQuery.error?.message}
+      </Alert>
 
       {hotelsQuery.isLoading ? (
         <div className="empty-state">{t("hotels.loading")}</div>
@@ -132,7 +165,7 @@ export default function HotelsMap() {
             </div>
           }
         >
-          <HotelsGoogleMap hotels={hotels} variant="page" />
+          <HotelsGoogleMap hotels={hotels} variant="page" detailBookingQuery={detailBookingQuery} />
         </Suspense>
       ) : (
         <div className="empty-state">
@@ -143,23 +176,6 @@ export default function HotelsMap() {
           </Link>
         </div>
       )}
-
-      {hotelsQuery.data && hotelsQuery.data.totalPages > 1 ? (
-        <div className="pagination">
-          <button disabled={hotelsQuery.data.first} onClick={() => changePage(page - 1)}>
-            {t("hotels.previous")}
-          </button>
-          <span>
-            {t("hotels.pageOf", {
-              page: hotelsQuery.data.page + 1,
-              total: Math.max(hotelsQuery.data.totalPages, 1),
-            })}
-          </span>
-          <button disabled={hotelsQuery.data.last} onClick={() => changePage(page + 1)}>
-            {t("hotels.next")}
-          </button>
-        </div>
-      ) : null}
     </section>
   );
 }

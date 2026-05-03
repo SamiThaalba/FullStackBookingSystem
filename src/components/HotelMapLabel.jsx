@@ -1,29 +1,54 @@
 import { Link } from "react-router-dom";
 
 /** Pin hitbox / map anchor slot — keep in sync with `.hotel-map-label__pin` in CSS */
-export const HOTEL_MAP_PIN_WIDTH = 40;
-export const HOTEL_MAP_PIN_HEIGHT = 40;
+export const HOTEL_MAP_PIN_WIDTH = 32;
+export const HOTEL_MAP_PIN_HEIGHT = 32;
 
 /** Map lat/lng aligns to the visual tip of the pin (near bottom of slot) */
-const PIN_TIP_Y_FRAC = 38 / 40;
+const PIN_TIP_Y_FRAC = 30 / 32;
 
-export function HotelMapLabel({ hotel }) {
+export function HotelMapLabel({ hotel, usePreview = false, onPreview }) {
   const title = hotel.city ? `${hotel.name} — ${hotel.city}` : hotel.name;
+
+  const pin = (
+    <span className="hotel-map-label__pin" aria-hidden>
+      <span className="hotel-map-label__pin-body" />
+    </span>
+  );
+  const name = (
+    <span className="hotel-map-label__name" dir="auto">
+      {hotel.name}
+    </span>
+  );
+
+  if (usePreview && typeof onPreview === "function") {
+    return (
+      <button
+        type="button"
+        className="hotel-map-label hotel-map-label--compact"
+        dir="ltr"
+        title={title}
+        onClick={(e) => {
+          e.stopPropagation();
+          onPreview(hotel);
+        }}
+      >
+        {pin}
+        {name}
+      </button>
+    );
+  }
 
   return (
     <Link
       to={`/hotels/${hotel.id}`}
-      className="hotel-map-label"
+      className="hotel-map-label hotel-map-label--compact"
       dir="ltr"
       title={title}
       onClick={(e) => e.stopPropagation()}
     >
-      <span className="hotel-map-label__pin" aria-hidden>
-        <span className="hotel-map-label__pin-body" />
-      </span>
-      <span className="hotel-map-label__name" dir="auto">
-        {hotel.name}
-      </span>
+      {pin}
+      {name}
     </Link>
   );
 }

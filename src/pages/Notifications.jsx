@@ -9,11 +9,16 @@ export default function Notifications() {
   const notificationsQuery = useQuery({
     queryKey: ["notifications"],
     queryFn: bookingApi.notifications,
+    refetchInterval: 12_000,
+    refetchOnWindowFocus: true,
   });
 
   const unreadCountQuery = useQuery({
     queryKey: ["notifications-unread-count"],
     queryFn: bookingApi.unreadNotificationCount,
+    refetchInterval: 12_000,
+    refetchOnWindowFocus: true,
+    staleTime: 4_000,
   });
 
   const markReadMutation = useMutation({
