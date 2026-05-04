@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useSearchParams } from "react-router-dom";
 import { bookingApi } from "../api/bookingApi";
@@ -7,23 +7,37 @@ import { buildSearchCityRows } from "../utils/searchCities";
 import Alert from "../components/Alert";
 import HotelCard from "../components/HotelCard";
 import SearchPanel from "../components/SearchPanel";
+import { useBookingUi } from "../context/BookingUiContext";
 import { FaMapMarkerAlt } from "react-icons/fa";
 import { FaMap } from "react-icons/fa6";
 export default function Hotels() {
   const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
+  const { updateBookingUi } = useBookingUi();
   const page = Number(searchParams.get("page") || 0) || 0;
   const country = searchParams.get("country") || "";
+  const city = searchParams.get("city") || "";
+  const from = searchParams.get("from") || "";
+  const to = searchParams.get("to") || "";
+  const guests = Number(searchParams.get("guests") || 1);
+  const name = searchParams.get("name") || "";
+  const adults = searchParams.get("adults") || "";
+  const children = searchParams.get("children") || "";
 
   const filters = useMemo(
     () => ({
       page,
       size: 6,
-      city: searchParams.get("city") || "",
+      city,
       country,
-      name: searchParams.get("name") || "",
+      name,
+      from: from || undefined,
+      to: to || undefined,
+      guests: guests || undefined,
+      adults: adults || undefined,
+      children: children || undefined,
     }),
-    [country, page, searchParams],
+    [city, country, name, page, from, to, guests, adults, children],
   );
 
   const hotelsQuery = useQuery({
@@ -46,6 +60,21 @@ export default function Hotels() {
   const hotels = hotelsQuery.data?.content || [];
   const queryString = searchParams.toString();
   const mapHref = queryString ? `/hotels/map?${queryString}` : "/hotels/map";
+
+  useEffect(() => {
+    updateBookingUi({
+      city,
+      checkInDate: from || undefined,
+      checkOutDate: to || undefined,
+      guests,
+    });
+    console.info("[BookingUi] Hotels page synced from URL", {
+      city,
+      from,
+      to,
+      guests,
+    });
+  }, [city, from, to, guests, updateBookingUi]);
 
   const searchCityRows = useMemo(
     () => buildSearchCityRows(citiesQuery.data ?? [], hotels),
@@ -82,8 +111,8 @@ export default function Hotels() {
         compact
         initialValues={{
           city: searchParams.get("city") || "",
-          from: searchParams.get("from") || undefined,
-          to: searchParams.get("to") || undefined,
+          from: from || undefined,
+          to: to || undefined,
           adults: searchParams.get("adults") || 2,
           children: searchParams.get("children") || 0,
           rooms: searchParams.get("rooms") || 1,

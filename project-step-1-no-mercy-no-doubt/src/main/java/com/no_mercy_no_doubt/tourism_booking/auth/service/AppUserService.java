@@ -27,6 +27,16 @@ public class AppUserService {
         return userRepository.findAll().stream().map(roleManagementService::toUserResponse).toList();
     }
 
+    public List<UserResponse> searchByUsername(String query) {
+        String normalized = query == null ? "" : query.trim();
+        if (normalized.length() < 2) {
+            return List.of();
+        }
+        return userRepository.findTop20ByUsernameContainingIgnoreCaseOrderByUsernameAsc(normalized).stream()
+                .map(roleManagementService::toUserResponse)
+                .toList();
+    }
+
     public UserResponse getById(Long id) {
         AppUser user = userRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("User", id));

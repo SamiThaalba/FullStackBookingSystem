@@ -3,6 +3,7 @@ package com.no_mercy_no_doubt.tourism_booking.catalog.Booking;
 import com.no_mercy_no_doubt.tourism_booking.AvailabilityPricing.dto.AvailabilityCheckResponse;
 import com.no_mercy_no_doubt.tourism_booking.AvailabilityPricing.service.AvailabilityPricingService;
 import com.no_mercy_no_doubt.tourism_booking.auth.entity.AppUser;
+import com.no_mercy_no_doubt.tourism_booking.auth.repository.AppUserRepository;
 import com.no_mercy_no_doubt.tourism_booking.auth.service.RoleManagementService;
 import com.no_mercy_no_doubt.tourism_booking.catalog.Hotel.Hotel;
 import com.no_mercy_no_doubt.tourism_booking.catalog.Hotel.HotelRepository;
@@ -11,8 +12,10 @@ import com.no_mercy_no_doubt.tourism_booking.catalog.RoomType.RoomTypeRepository
 import com.no_mercy_no_doubt.tourism_booking.common.exception.BusinessException;
 import com.no_mercy_no_doubt.tourism_booking.common.exception.ResourceNotFoundException;
 import com.no_mercy_no_doubt.tourism_booking.common.utils.CurrentUserProvider;
+import com.no_mercy_no_doubt.tourism_booking.notification.service.BookingConfirmationEmailService;
 import com.no_mercy_no_doubt.tourism_booking.wishlist.service.AlertService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -23,6 +26,7 @@ import java.util.List;
 @Service
 @RequiredArgsConstructor
 @Transactional
+@Slf4j
 public class BookingService {
 
     private final BookingRepository bookingRepository;
@@ -33,6 +37,8 @@ public class BookingService {
     private final AvailabilityPricingService availabilityPricingService;
     private final CurrentUserProvider currentUserProvider;
     private final RoleManagementService roleManagementService;
+    private final AppUserRepository appUserRepository;
+    private final BookingConfirmationEmailService bookingConfirmationEmailService;
 
     public BookingResponse createBooking(BookingRequest request) {
         validateBookingRequest(request);
@@ -72,7 +78,7 @@ public class BookingService {
     public List<BookingResponse> getAllBookings() {
         AppUser currentUser = currentUserProvider.getCurrentUser();
 
-        if (roleManagementService.userHasPermission(currentUser, "hotel:view_all")) {
+        if (roleManagementService.canBypassHotelScope(currentUser)) {
             return bookingRepository.findAll()
                     .stream()
                     .map(bookingMapper::toResponse)
@@ -106,7 +112,7 @@ public class BookingService {
     public List<BookingResponse> getBookingsByStatus(BookingStatus status) {
         AppUser currentUser = currentUserProvider.getCurrentUser();
 
-        if (roleManagementService.userHasPermission(currentUser, "hotel:view_all")) {
+        if (roleManagementService.canBypassHotelScope(currentUser)) {
             return bookingRepository.findByStatus(status)
                     .stream()
                     .map(bookingMapper::toResponse)
@@ -147,7 +153,7 @@ public class BookingService {
                     .toList();
         }
 
-        if (roleManagementService.userHasPermission(currentUser, "hotel:view_all")) {
+        if (roleManagementService.canBypassHotelScope(currentUser)) {
             return bookingRepository.findByStartDateGreaterThanEqualAndStatusNotOrderByStartDateAsc(
                             today,
                             BookingStatus.CANCELLED
@@ -201,6 +207,7 @@ public class BookingService {
         booking.setStatus(BookingStatus.CONFIRMED);
 
         Booking savedBooking = bookingRepository.save(booking);
+        sendBookingConfirmationEmail(savedBooking);
         return bookingMapper.toResponse(savedBooking);
     }
 
@@ -306,7 +313,7 @@ public class BookingService {
     private void ensureCanAccessBooking(Booking booking) {
         AppUser currentUser = currentUserProvider.getCurrentUser();
 
-        if (roleManagementService.userHasPermission(currentUser, "hotel:view_all")) return;
+        if (roleManagementService.canBypassHotelScope(currentUser)) return;
         if (booking.getGuestId().equals(currentUser.getId())) return;
         if (managesHotel(currentUser.getId(), booking.getHotelId())) return;
 
@@ -317,7 +324,8 @@ public class BookingService {
     private void ensureCanManageBooking(Booking booking) {
         AppUser currentUser = currentUserProvider.getCurrentUser();
 
-        if (roleManagementService.userHasPermission(currentUser, "hotel:view_all")) return;
+        if (roleManagementService.canBypassHotelScope(currentUser)) return;
+        if (booking.getGuestId() != null && booking.getGuestId().equals(currentUser.getId())) return;
         if (managesHotel(currentUser.getId(), booking.getHotelId())) return;
 
         throw new org.springframework.security.access.AccessDeniedException(
@@ -327,7 +335,7 @@ public class BookingService {
     private void ensureCanCancelBooking(Booking booking) {
         AppUser currentUser = currentUserProvider.getCurrentUser();
 
-        if (roleManagementService.userHasPermission(currentUser, "hotel:view_all")) return;
+        if (roleManagementService.canBypassHotelScope(currentUser)) return;
         if (booking.getGuestId().equals(currentUser.getId())) return;
         if (managesHotel(currentUser.getId(), booking.getHotelId())) return;
 
@@ -338,7 +346,7 @@ public class BookingService {
     private void ensureCanAccessHotel(Hotel hotel) {
         AppUser currentUser = currentUserProvider.getCurrentUser();
 
-        if (roleManagementService.userHasPermission(currentUser, "hotel:view_all")) return;
+        if (roleManagementService.canBypassHotelScope(currentUser)) return;
         if (managesHotel(currentUser.getId(), hotel.getId())) return;
 
         throw new org.springframework.security.access.AccessDeniedException(
@@ -369,5 +377,15 @@ public class BookingService {
         if (overlappingBookings >= roomType.getInventoryCount()) {
             throw new BusinessException("No rooms are available for the selected dates.");
         }
+    }
+
+    private void sendBookingConfirmationEmail(Booking booking) {
+        log.info("Booking success handler triggered for booking {}", booking.getId());
+        AppUser guest = appUserRepository.findById(booking.getGuestId()).orElse(null);
+        Hotel hotel = hotelRepository.findById(booking.getHotelId()).orElse(null);
+        Integer guestCount = roomTypeRepository.findById(booking.getRoomTypeId())
+                .map(RoomType::getCapacity)
+                .orElse(1);
+        bookingConfirmationEmailService.sendBookingConfirmation(guest, hotel, booking, guestCount);
     }
 }

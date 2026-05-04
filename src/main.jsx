@@ -5,6 +5,7 @@ import { BrowserRouter } from "react-router-dom";
 import "./i18n/config.js";
 import App from "./App.jsx";
 import { AuthProvider } from "./auth/AuthContext.jsx";
+import { BookingUiProvider } from "./context/BookingUiContext.jsx";
 import { ThemeProvider } from "./theme/ThemeContext.jsx";
 import "./styles.css";
 
@@ -23,9 +24,11 @@ ReactDOM.createRoot(document.getElementById("root")).render(
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <AuthProvider>
-          <ThemeProvider>
-            <App />
-          </ThemeProvider>
+          <BookingUiProvider>
+            <ThemeProvider>
+              <App />
+            </ThemeProvider>
+          </BookingUiProvider>
         </AuthProvider>
       </BrowserRouter>
     </QueryClientProvider>

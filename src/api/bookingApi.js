@@ -48,6 +48,9 @@ export const bookingApi = {
     adminReplaceRolePermissions:(roleId,payload)=>apiRequest(`/admin/roles/${roleId}/permissions`,{method:"PUT",body:JSON.stringify(payload)}),
     adminAssignRoleToUser:(userId,roleId)=>apiRequest(`/admin/users/${userId}/roles/${roleId}`,{method:"POST"}),
     adminRemoveRoleFromUser:(userId,roleId)=>apiRequest(`/admin/users/${userId}/roles/${roleId}`,{method:"DELETE"}),
+    adminUsersSearch:(q)=>apiRequest(`/users/search?${toQuery({ q })}`),
+    adminActivityLogs:(params={})=>apiRequest(`/admin/activity-logs?${toQuery(params)}`),
+    assistantChat:(payload)=>apiRequest("/chat/assistant",{method:"POST",body:JSON.stringify(payload)}),
 };
 
 function toQuery(params={}){

@@ -9,6 +9,7 @@ import LanguageSwitcher from "./LanguageSwitcher";
 import NotificationBellIcon from "./NotificationBellIcon";
 import NotificationSlideIn from "./NotificationSlideIn";
 import ThemeToggle from "./ThemeToggle";
+import BookingAssistant from "./BookingAssistant";
 
 export default function Layout() {
   const { t, i18n } = useTranslation();
@@ -126,6 +127,7 @@ export default function Layout() {
       <main>
         <Outlet />
       </main>
+      <BookingAssistant />
 
       <footer className="site-footer">
         <div className="container footer-grid">

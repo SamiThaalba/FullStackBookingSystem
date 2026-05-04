@@ -64,7 +64,7 @@ public class PaymentService {
     private void ensureCanManagePaymentForBooking(Booking booking) {
         AppUser currentUser = currentUserProvider.getCurrentUser();
 
-        if (roleManagementService.userHasPermission(currentUser, "hotel:view_all")) {
+        if (roleManagementService.canBypassHotelScope(currentUser)) {
             return;
         }
 
