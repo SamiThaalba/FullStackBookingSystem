@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
-import { bookingApi } from "../api/bookingApi";
+import { bookingApi, buildBookingCreatePayload } from "../api/bookingApi";
 import { useAuth } from "../auth/AuthContext";
 import { useBookingUi } from "../context/BookingUiContext";
 import { parseUserPickIndex, resolveCityBilingual } from "../utils/aiAssistant";
@@ -264,11 +264,8 @@ export default function HomeAiAssistant({ cities: _cities } = {}) {
       checkOutDate: checkOut,
       guests,
     });
-    navigate(`/hotels?${query.toString()}`);
-
-    navigate(
-      `/hotels/${hotelId}?from=${encodeURIComponent(checkIn || "")}&to=${encodeURIComponent(checkOut || "")}&guests=${guests}`,
-    );
+    // Go directly to selected hotel's details with active filters.
+    navigate(`/hotels/${hotelId}?${query.toString()}`);
 
     const [hotel, rooms] = await Promise.all([
       bookingApi.getHotel(hotelId),
@@ -470,14 +467,7 @@ export default function HomeAiAssistant({ cities: _cities } = {}) {
     setLoading(true);
     const baseChat = [...chat];
     try {
-      const booking = await bookingApi.createBooking({
-        hotelId: Number(confirmDraft.hotel.id),
-        roomTypeId: Number(confirmDraft.room.id),
-        startDate: confirmDraft.checkIn,
-        endDate: confirmDraft.checkOut,
-        checkInDate: confirmDraft.checkIn,
-        checkOutDate: confirmDraft.checkOut,
-      });
+      const booking = await bookingApi.createBooking(buildBookingCreatePayload(confirmDraft));
       const payment = await bookingApi.createPayment(booking.id);
       await bookingApi.processPayment(payment.id, true);
       const confirmed = await bookingApi.confirmBooking(booking.id);

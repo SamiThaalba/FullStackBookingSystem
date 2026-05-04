@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { bookingApi } from "../api/bookingApi";
+import { bookingApi, buildBookingCreatePayload } from "../api/bookingApi";
 import { useAuth } from "../auth/AuthContext";
 import { useBookingUi } from "../context/BookingUiContext";
 import { parseUserPickIndex, resolveCityBilingual } from "../utils/aiAssistant";
@@ -993,14 +993,7 @@ export default function BookingAssistant({ embedded = false }) {
         // If duplicate-check endpoint is unavailable for this user, continue with booking attempt.
       }
 
-      const booking = await bookingApi.createBooking({
-        hotelId: Number(confirmDraft.hotel.id),
-        roomTypeId: Number(confirmDraft.room.id),
-        startDate: confirmDraft.checkIn,
-        endDate: confirmDraft.checkOut,
-        checkInDate: confirmDraft.checkIn,
-        checkOutDate: confirmDraft.checkOut,
-      });
+      const booking = await bookingApi.createBooking(buildBookingCreatePayload(confirmDraft));
       const payment = await bookingApi.createPayment(booking.id);
       await bookingApi.processPayment(payment.id, true);
       const confirmed = await bookingApi.confirmBooking(booking.id);

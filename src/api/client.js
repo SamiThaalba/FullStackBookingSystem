@@ -52,13 +52,34 @@ export async function apiRequest(path, options = {}) {
 }
 
 function extractErrorMessage(payload, status) {
-  if (typeof payload === "string" && payload.trim()) return payload;
+  if (typeof payload === "string" && payload.trim()) return payload.trim();
+
+  // Spring MethodArgumentNotValidException: { error, messages: { field: "..." } }
+  const fromMessages = formatValidationMessagesMap(payload?.messages);
+  if (fromMessages) return fromMessages;
+
+  // Standard ErrorResponse.fieldErrors
+  if (Array.isArray(payload?.fieldErrors) && payload.fieldErrors.length) {
+    const parts = payload.fieldErrors
+      .map((fe) => (fe?.field && fe?.message ? `${fe.field}: ${fe.message}` : fe?.message))
+      .filter(Boolean);
+    if (parts.length) return parts.join(" ");
+  }
+
   if (payload?.message) return payload.message;
   if (payload?.error) return payload.error;
-  if (payload?.messages) {
-    return Object.values(payload.messages).flat().join(", ");
-  }
   if (status === 401) return "Please log in to continue.";
   if (status === 403) return "You do not have permission to perform this action.";
   return "Something went wrong. Please try again.";
+}
+
+/** @param {Record<string, unknown> | undefined} messages */
+function formatValidationMessagesMap(messages) {
+  if (!messages || typeof messages !== "object" || Array.isArray(messages)) return null;
+  const parts = Object.entries(messages).map(([field, raw]) => {
+    const text = Array.isArray(raw) ? raw.join(", ") : raw != null ? String(raw) : "";
+    return text ? `${field}: ${text}` : null;
+  });
+  const filtered = parts.filter(Boolean);
+  return filtered.length ? filtered.join(" ") : null;
 }

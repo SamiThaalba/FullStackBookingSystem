@@ -58,3 +58,35 @@ function toQuery(params={}){
     Object.entries(params).forEach(([k,v])=>{ if(v!==undefined&&v!==null&&v!=="") q.set(k,v); });
     return q.toString();
 }
+
+/**
+ * Build body for POST /bookings — must match backend {@code BookingRequest}
+ * (hotelId, roomTypeId, startDate, endDate as yyyy-MM-dd only).
+ * @param {{ hotel?: { id?: unknown, hotelId?: unknown }, room?: { id?: unknown, roomTypeId?: unknown }, checkIn?: unknown, checkOut?: unknown }} draft
+ */
+export function buildBookingCreatePayload(draft) {
+    const hotelId = Number(draft?.hotel?.id ?? draft?.hotel?.hotelId);
+    const roomTypeId = Number(draft?.room?.id ?? draft?.room?.roomTypeId);
+    const startDate = normalizeBookingIsoDate(draft?.checkIn);
+    const endDate = normalizeBookingIsoDate(draft?.checkOut);
+    if (!Number.isFinite(hotelId) || hotelId <= 0) {
+        throw new Error("Missing or invalid hotel for booking.");
+    }
+    if (!Number.isFinite(roomTypeId) || roomTypeId <= 0) {
+        throw new Error("Missing or invalid room type for booking.");
+    }
+    if (!startDate || !endDate) {
+        throw new Error("Check-in and check-out dates are required (YYYY-MM-DD).");
+    }
+    return { hotelId, roomTypeId, startDate, endDate };
+}
+
+function normalizeBookingIsoDate(value) {
+    if (value == null || value === "") return null;
+    const s = String(value).trim();
+    const iso = s.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (iso) return iso[1];
+    const d = new Date(s);
+    if (Number.isNaN(d.getTime())) return null;
+    return d.toISOString().slice(0, 10);
+}

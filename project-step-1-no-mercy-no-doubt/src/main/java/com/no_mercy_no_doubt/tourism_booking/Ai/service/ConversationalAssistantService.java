@@ -7,6 +7,8 @@ import com.no_mercy_no_doubt.tourism_booking.Recommendation.dto.HotelRecommendat
 import com.no_mercy_no_doubt.tourism_booking.Recommendation.service.RecommendationService;
 import com.no_mercy_no_doubt.tourism_booking.catalog.Hotel.Hotel;
 import com.no_mercy_no_doubt.tourism_booking.catalog.Hotel.HotelRepository;
+import com.no_mercy_no_doubt.tourism_booking.catalog.Hotel.HotelResponse;
+import com.no_mercy_no_doubt.tourism_booking.catalog.Hotel.HotelService;
 import com.no_mercy_no_doubt.tourism_booking.catalog.RoomType.RoomType;
 import com.no_mercy_no_doubt.tourism_booking.catalog.RoomType.RoomTypeRepository;
 import lombok.RequiredArgsConstructor;
@@ -22,6 +24,7 @@ import java.time.temporal.TemporalAdjusters;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -33,14 +36,19 @@ import java.util.regex.Pattern;
 @RequiredArgsConstructor
 @Slf4j
 public class ConversationalAssistantService {
-    private static final Pattern GUEST_COUNT_PATTERN =
-            Pattern.compile("\\b(\\d{1,2})\\s*(guest|guests|people|person)?\\b", Pattern.CASE_INSENSITIVE);
+    /**
+     * Must include an explicit guest-related word — otherwise "5" in "5/5/2026" is mistaken for 5 guests.
+     */
+    private static final Pattern GUEST_COUNT_PATTERN = Pattern.compile(
+            "\\b(\\d{1,2})\\s*(?:guests?|people|persons?|travelers?|pax|of\\s+us|in\\s+our\\s+group)\\b",
+            Pattern.CASE_INSENSITIVE);
     private static final Pattern ORDINAL_PICK_PATTERN =
             Pattern.compile("\\b(\\d{1,2})(?:st|nd|rd|th)?\\b", Pattern.CASE_INSENSITIVE);
 
     private final GroqClientService groqClientService;
     private final RecommendationService recommendationService;
     private final HotelRepository hotelRepository;
+    private final HotelService hotelService;
     private final RoomTypeRepository roomTypeRepository;
     private final ObjectMapper objectMapper;
 
@@ -50,6 +58,12 @@ public class ConversationalAssistantService {
         String previousCheckIn = context.getCheckIn();
         String previousCheckOut = context.getCheckOut();
         Integer previousGuests = context.getGuests();
+        Boolean previousAnyCity = context.getAnyCity();
+
+        if (userMeansAnyCity(request.getMessage())) {
+            context.setAnyCity(true);
+            context.setCity(null);
+        }
 
         JsonNode llmJson = parseAssistantJson(callAssistantLlm(request, context));
         String intent = textNode(llmJson, "intent", "other");
@@ -58,17 +72,31 @@ public class ConversationalAssistantService {
         }
 
         JsonNode slots = llmJson.path("slots");
-        String requestedHotelName = textNode(slots, "selectedHotelName", null);
-        if (isBlank(requestedHotelName)) {
-            requestedHotelName = firstNonBlank(extractRequestedHotelName(request.getMessage()), inferHotelNameFromMessage(request.getMessage()));
+        // Prefer persisted pending name before inferHotelNameFromMessage — short replies like "ramallah" must not replace it.
+        String requestedHotelName = firstNonBlank(
+                textNode(slots, "selectedHotelName", null),
+                extractRequestedHotelName(request.getMessage()),
+                extractHotelNameWantPatterns(request.getMessage()),
+                context.getPendingHotelName(),
+                inferHotelNameFromMessage(request.getMessage())
+        );
+        if (!isBlank(requestedHotelName) && context.getSelectedHotelId() == null) {
+            context.setPendingHotelName(requestedHotelName.trim());
         }
         String requestedRoomTypeName = textNode(slots, "selectedRoomTypeName", null);
-        context.setCity(firstNonBlank(textNode(slots, "city", null), context.getCity()));
+        String extractedCity = textNode(slots, "city", null);
+        if (userMeansAnyCity(extractedCity)) {
+            context.setAnyCity(true);
+            context.setCity(null);
+        } else if (!Boolean.TRUE.equals(context.getAnyCity())) {
+            context.setCity(firstNonBlank(extractedCity, context.getCity()));
+        }
         context.setCheckIn(firstNonBlank(normalizeDateSlot(textNode(slots, "checkIn", null)), context.getCheckIn()));
         context.setCheckOut(firstNonBlank(normalizeDateSlot(textNode(slots, "checkOut", null)), context.getCheckOut()));
         context.setGuests(firstNonNull(intNode(slots, "guests"), context.getGuests()));
         context.setSelectedRoomTypeName(firstNonBlank(requestedRoomTypeName, context.getSelectedRoomTypeName()));
-        if (primaryBookingFieldsChanged(previousCity, previousCheckIn, previousCheckOut, previousGuests, context)) {
+        if (primaryBookingFieldsChanged(previousCity, previousCheckIn, previousCheckOut, previousGuests, context)
+                || !Objects.equals(Boolean.TRUE.equals(previousAnyCity), Boolean.TRUE.equals(context.getAnyCity()))) {
             context.setSelectedHotelId(null);
             context.setSelectedHotelName(null);
             context.setSelectedRoomTypeId(null);
@@ -76,15 +104,16 @@ public class ConversationalAssistantService {
         }
         applyNaturalDateFallback(request.getMessage(), context);
         boolean hasGuestToken = applyHeuristicGuestFallback(request.getMessage(), context);
+        sanitizeGuestsIfDateDigitNoise(request.getMessage(), context);
 
         if (("other".equals(intent) || "follow_up".equals(intent))
                 && "booking".equalsIgnoreCase(context.getMode())) {
             intent = "booking";
         }
-        if ("other".equals(intent) && context.getCity() != null && hasGuestToken) {
+        if ("other".equals(intent) && (context.getCity() != null || Boolean.TRUE.equals(context.getAnyCity())) && hasGuestToken) {
             intent = "booking";
         }
-        if ("other".equals(intent) && context.getCity() != null
+        if ("other".equals(intent) && (context.getCity() != null || Boolean.TRUE.equals(context.getAnyCity()))
                 && (context.getCheckIn() != null || context.getCheckOut() != null || context.getGuests() != null)) {
             intent = "booking";
         }
@@ -99,24 +128,7 @@ public class ConversationalAssistantService {
         log.info("AI parsed slots -> city={}, checkIn={}, checkOut={}, guests={}, intent={}",
                 context.getCity(), context.getCheckIn(), context.getCheckOut(), context.getGuests(), intent);
 
-        List<HotelRecommendationResponse> recommendations = List.of();
-        if (context.getCity() != null && !context.getCity().isBlank()) {
-            try {
-                recommendations = recommendationService.recommendHotels(
-                        context.getCity(),
-                        null,
-                        null,
-                        context.getGuests(),
-                        List.of(),
-                        5
-                );
-            } catch (Exception ignored) {
-                recommendations = List.of();
-            }
-        }
-        if ((recommendations == null || recommendations.isEmpty()) && !isBlank(requestedHotelName)) {
-            recommendations = findHotelsByName(requestedHotelName);
-        }
+        List<HotelRecommendationResponse> recommendations = buildRecommendations(context, requestedHotelName);
 
         HotelSelectionResult selectionResult = resolveHotelSelection(
                 request.getMessage(),
@@ -127,6 +139,7 @@ public class ConversationalAssistantService {
         if (selectionResult.selected() != null) {
             context.setSelectedHotelId(selectionResult.selected().getHotelId());
             context.setSelectedHotelName(selectionResult.selected().getHotelName());
+            context.setPendingHotelName(null);
             context.setSelectedRoomTypeId(null);
             context.setSelectedRoomTypeName(null);
             context.setMode("selecting_room");
@@ -199,6 +212,8 @@ public class ConversationalAssistantService {
             }
         }
 
+        context.setCurrentStep(resolveCurrentStep(intent, context, missing));
+
         return AssistantChatResponse.builder()
                 .reply(reply)
                 .intent(intent)
@@ -207,6 +222,26 @@ public class ConversationalAssistantService {
                 .action(action)
                 .recommendations(recommendations)
                 .build();
+    }
+
+    private String resolveCurrentStep(String intent, AssistantContext context, List<String> missing) {
+        if (!"booking".equals(intent) && !"search".equals(intent) && !"filter".equals(intent)) {
+            return context.getCurrentStep();
+        }
+        boolean anyCity = Boolean.TRUE.equals(context.getAnyCity());
+        boolean hasCityOrAll = anyCity || (!isBlank(context.getCity()));
+        boolean hasDates = !isBlank(context.getCheckIn()) && !isBlank(context.getCheckOut());
+        boolean hasGuests = context.getGuests() != null && context.getGuests() > 0;
+        boolean hasHotel = context.getSelectedHotelId() != null;
+        boolean hasRoom = context.getSelectedRoomTypeId() != null;
+
+        if (!hasCityOrAll && !hasHotel && missing.contains("city")) return "CITY";
+        if (!hasDates && (missing.contains("checkIn") || missing.contains("checkOut"))) return "DATES";
+        if (!hasGuests && missing.contains("guests")) return "GUESTS";
+        if (!hasHotel) return "SHOW_HOTELS";
+        if (!hasRoom) return "SHOW_ROOMS";
+        if ("confirming".equalsIgnoreCase(context.getMode())) return "CONFIRM";
+        return "PAYMENT";
     }
 
     private String callAssistantLlm(AssistantChatRequest request, AssistantContext context) {
@@ -224,6 +259,7 @@ public class ConversationalAssistantService {
                   "reply":"string",
                   "slots":{
                     "city":"string|null",
+                    "anyCity":true|false|null,
                     "checkIn":"YYYY-MM-DD|null",
                     "checkOut":"YYYY-MM-DD|null",
                     "guests":number|null,
@@ -236,6 +272,7 @@ public class ConversationalAssistantService {
         StringBuilder userPrompt = new StringBuilder();
         userPrompt.append("Current context:\n")
                 .append("city=").append(context.getCity()).append("\n")
+                .append("anyCity=").append(context.getAnyCity()).append("\n")
                 .append("checkIn=").append(context.getCheckIn()).append("\n")
                 .append("checkOut=").append(context.getCheckOut()).append("\n")
                 .append("guests=").append(context.getGuests()).append("\n")
@@ -259,7 +296,7 @@ public class ConversationalAssistantService {
     private AssistantActionPlan buildAction(String intent, AssistantContext context, List<String> missing,
                                             List<HotelRecommendationResponse> recommendations) {
         if ("search".equals(intent) || "filter".equals(intent) || "follow_up".equals(intent)) {
-            if (context.getCity() != null && !context.getCity().isBlank()) {
+            if (Boolean.TRUE.equals(context.getAnyCity()) || (context.getCity() != null && !context.getCity().isBlank())) {
                 return AssistantActionPlan.builder()
                         .type("NAVIGATE_DISCOVER")
                         .city(context.getCity())
@@ -320,12 +357,17 @@ public class ConversationalAssistantService {
                                                 List<HotelRecommendationResponse> recommendations) {
         List<String> missing = new ArrayList<>();
         if ("booking".equals(intent)) {
-            if (isBlank(context.getCity()) && context.getSelectedHotelId() == null) missing.add("city");
+            boolean anyCity = Boolean.TRUE.equals(context.getAnyCity());
+            boolean namedHotelPending = !isBlank(context.getPendingHotelName()) && context.getSelectedHotelId() == null;
+            if (!anyCity && isBlank(context.getCity()) && context.getSelectedHotelId() == null && !namedHotelPending) {
+                missing.add("city");
+            }
             boolean datesOrGuestsMissing = isBlank(context.getCheckIn())
                     || isBlank(context.getCheckOut())
                     || context.getGuests() == null
                     || context.getGuests() < 1;
-            boolean explicitHotelRequest = !isBlank(context.getSelectedHotelName()) && context.getSelectedHotelId() == null;
+            boolean explicitHotelRequest = (!isBlank(context.getSelectedHotelName()) && context.getSelectedHotelId() == null)
+                    || namedHotelPending;
 
             // Normal flow: city -> dates/guests -> hotel -> room.
             // Direct hotel flow: if user explicitly gave a hotel name, allow hotel selection earlier.
@@ -348,7 +390,7 @@ public class ConversationalAssistantService {
                 if (context.getGuests() == null || context.getGuests() < 1) missing.add("guests");
             }
         } else if ("search".equals(intent) || "filter".equals(intent)) {
-            if (isBlank(context.getCity())) missing.add("city");
+            if (!Boolean.TRUE.equals(context.getAnyCity()) && isBlank(context.getCity())) missing.add("city");
         }
         return missing;
     }
@@ -375,8 +417,9 @@ public class ConversationalAssistantService {
     }
 
     private String missingPrompt(String missingField, AssistantContext context) {
+        String place = Boolean.TRUE.equals(context.getAnyCity()) || isBlank(context.getCity()) ? "any city" : context.getCity();
         return switch (missingField) {
-            case "checkIn" -> "Great, I can help with " + context.getCity() + ". What is your check-in date?";
+            case "checkIn" -> "Great, I can help with " + place + ". What is your check-in date?";
             case "checkOut" -> "Got it. What is your check-out date?";
             case "guests" -> "Perfect. How many guests will stay?";
             case "hotelSelection" -> "Which hotel would you like to book?";
@@ -407,8 +450,92 @@ public class ConversationalAssistantService {
         return value == null || value.isBlank();
     }
 
-    private static String firstNonBlank(String first, String second) {
-        return !isBlank(first) ? first : second;
+    private boolean userMeansAnyCity(String text) {
+        String value = String.valueOf(text == null ? "" : text).toLowerCase(Locale.ROOT).trim();
+        if (value.isEmpty()) return false;
+        String compact = value.replaceAll("\\s+", "");
+        return value.contains("any city")
+                || compact.contains("anycity")
+                || value.contains("all cities")
+                || value.contains("anywhere")
+                || value.equals("any")
+                || value.contains("doesn't matter")
+                || value.contains("doesnt matter")
+                || value.contains("don't care")
+                || value.contains("dont care");
+    }
+
+    private List<HotelRecommendationResponse> buildRecommendations(AssistantContext context, String requestedHotelName) {
+        // Direct hotel-name flow: find by name even without city.
+        if (!isBlank(requestedHotelName)) {
+            List<HotelRecommendationResponse> byName = findHotelsByName(requestedHotelName);
+            if (byName != null && !byName.isEmpty()) return byName;
+        }
+
+        boolean anyCity = Boolean.TRUE.equals(context.getAnyCity());
+        String city = anyCity ? null : (isBlank(context.getCity()) ? null : context.getCity().trim());
+        LocalDate from = parseDateIsoSafe(context.getCheckIn());
+        LocalDate to = parseDateIsoSafe(context.getCheckOut());
+        Integer guests = context.getGuests();
+
+        // Only show hotel options once we have enough data to filter correctly.
+        if ((anyCity || city != null) && from != null && to != null && guests != null && guests > 0) {
+            try {
+                var page = hotelService.listHotelsWithFilters(
+                        city,
+                        null,
+                        null,
+                        guests,
+                        null,
+                        null,
+                        from,
+                        to,
+                        0,
+                        5
+                );
+                return (page.getContent() == null ? List.<HotelResponse>of() : page.getContent())
+                        .stream()
+                        .map(h -> HotelRecommendationResponse.builder()
+                                .hotelId(h.getId())
+                                .hotelName(h.getName())
+                                .city(h.getCity())
+                                .country(h.getCountry())
+                                .build())
+                        .toList();
+            } catch (Exception ex) {
+                return List.of();
+            }
+        }
+
+        // Legacy fallback: city-only recommendation if we have city but not full filters yet.
+        if (city != null) {
+            try {
+                return recommendationService.recommendHotels(
+                        city,
+                        null,
+                        null,
+                        guests,
+                        List.of(),
+                        5
+                );
+            } catch (Exception ignored) {
+                return List.of();
+            }
+        }
+
+        return List.of();
+    }
+
+    private static String firstNonBlank(String... parts) {
+        if (parts == null) {
+            return null;
+        }
+        for (String p : parts) {
+            if (!isBlank(p)) {
+                return p.trim();
+            }
+        }
+        return null;
     }
 
     private static Integer firstNonNull(Integer first, Integer second) {
@@ -450,7 +577,10 @@ public class ConversationalAssistantService {
 
         String requestedHotelName = firstNonBlank(
                 requestedHotelNameFromSlot,
-                firstNonBlank(extractRequestedHotelName(message), inferHotelNameFromMessage(message))
+                extractRequestedHotelName(message),
+                extractHotelNameWantPatterns(message),
+                context.getPendingHotelName(),
+                inferHotelNameFromMessage(message)
         );
         if (isBlank(requestedHotelName)) {
             return HotelSelectionResult.none(false, false, List.of());
@@ -544,6 +674,33 @@ public class ConversationalAssistantService {
         return null;
     }
 
+    /**
+     * Phrases like "I want this hotel I want Patch Name Only22" (no "hotel called X" pattern).
+     */
+    private String extractHotelNameWantPatterns(String message) {
+        if (message == null || message.isBlank()) {
+            return null;
+        }
+        String t = message.trim();
+        List<Pattern> patterns = List.of(
+                Pattern.compile("(?i)\\bi\\s+want\\s+this\\s+hotel\\s+i\\s+want\\s+(.{2,200})$"),
+                Pattern.compile("(?i)\\bthis\\s+hotel\\s+i\\s+want\\s+(.{2,200})$"),
+                Pattern.compile("(?i)\\bhotel\\s+i\\s+want\\s+(.{2,200})$"),
+                Pattern.compile("(?i)\\bi\\s+want\\s+(?:this\\s+)?hotel\\s+(.{2,120})$"),
+                Pattern.compile("(?i)\\b(?:stay|staying|book|booking)\\s+(?:at|in)\\s+([\\p{L}\\p{N}&'\\-\\s]{2,120})$")
+        );
+        for (Pattern p : patterns) {
+            Matcher m = p.matcher(t);
+            if (m.find()) {
+                String name = m.group(1).trim().replaceAll("\\s+", " ");
+                if (name.length() >= 2) {
+                    return name;
+                }
+            }
+        }
+        return null;
+    }
+
     private String inferHotelNameFromMessage(String message) {
         if (message == null || message.isBlank()) {
             return null;
@@ -606,9 +763,14 @@ public class ConversationalAssistantService {
             return List.of();
         }
         try {
-            return roomTypeRepository.findByHotelId(hotelId).stream()
-                    .filter(this::isValidRoomType)
-                    .toList();
+            Map<Long, RoomType> byId = new LinkedHashMap<>();
+            for (RoomType rt : roomTypeRepository.findByHotelId(hotelId)) {
+                if (!isValidRoomType(rt)) {
+                    continue;
+                }
+                byId.putIfAbsent(rt.getId(), rt);
+            }
+            return new ArrayList<>(byId.values());
         } catch (Exception ex) {
             return List.of();
         }
@@ -828,6 +990,53 @@ public class ConversationalAssistantService {
             // ignore malformed number and keep existing context value
         }
         return false;
+    }
+
+    /**
+     * If the model inferred a guest count that only appears as a day/month in slash dates (e.g. 5 in 5/5/2026), drop it.
+     */
+    private void sanitizeGuestsIfDateDigitNoise(String message, AssistantContext context) {
+        if (message == null || context.getGuests() == null) {
+            return;
+        }
+        String lower = message.toLowerCase(Locale.ROOT);
+        if (lower.matches("(?s).*\\b(guest|guests|people|persons?|travelers?|pax)\\b.*")) {
+            return;
+        }
+        int g = context.getGuests();
+        Matcher slash = Pattern.compile("\\b\\d{1,2}/\\d{1,2}/\\d{2,4}\\b").matcher(message);
+        while (slash.find()) {
+            for (String part : slash.group().split("/")) {
+                if (part.length() >= 4) {
+                    continue;
+                }
+                try {
+                    if (Integer.parseInt(part) == g) {
+                        context.setGuests(null);
+                        return;
+                    }
+                } catch (NumberFormatException ignored) {
+                    // continue
+                }
+            }
+        }
+        Matcher iso = Pattern.compile("\\b\\d{4}-\\d{2}-\\d{2}\\b").matcher(message);
+        while (iso.find()) {
+            for (String part : iso.group().split("-")) {
+                if (part.length() == 4) {
+                    continue;
+                }
+                try {
+                    int n = Integer.parseInt(part);
+                    if (n == g) {
+                        context.setGuests(null);
+                        return;
+                    }
+                } catch (NumberFormatException ignored) {
+                    // continue
+                }
+            }
+        }
     }
 
     private LocalDate parseDateIsoSafe(String value) {

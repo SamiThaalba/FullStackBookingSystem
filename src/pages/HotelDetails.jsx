@@ -15,6 +15,8 @@ import RoomWishlistButton from "../components/RoomWishlistButton";
 
 const HotelsGoogleMap = lazy(() => import("../components/HotelsGoogleMap"));
 
+const ASSISTANT_MEMORY_KEY = "quickreserve-ai-memory-v2";
+
 export default function HotelDetails() {
   const { t } = useTranslation();
   const { hotelId } = useParams();
@@ -125,6 +127,26 @@ export default function HotelDetails() {
   });
   const nights = nightsBetween(dates.checkIn, dates.checkOut);
   const aiFocusRooms = searchParams.get("ai") === "1";
+
+  useEffect(() => {
+    // Keep AI chat state consistent with the hotel the user is viewing/choosing.
+    if (!hotel?.id) return;
+    try {
+      const parsed = JSON.parse(sessionStorage.getItem(ASSISTANT_MEMORY_KEY) || "null");
+      if (!parsed || typeof parsed !== "object") return;
+      const next = {
+        ...parsed,
+        context: {
+          ...(parsed.context || {}),
+          selectedHotelId: Number(hotel.id),
+          selectedHotelName: hotel.name || "",
+        },
+      };
+      sessionStorage.setItem(ASSISTANT_MEMORY_KEY, JSON.stringify(next));
+    } catch {
+      // ignore storage issues
+    }
+  }, [hotel?.id, hotel?.name]);
 
   useEffect(() => {
     const resumeIntent = window.history.state?.usr?.intent || null;
