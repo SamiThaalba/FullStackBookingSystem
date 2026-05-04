@@ -3,6 +3,7 @@ package com.no_mercy_no_doubt.tourism_booking.auth.repository;
 import com.no_mercy_no_doubt.tourism_booking.auth.entity.AppUser;
 import org.springframework.data.jpa.repository.JpaRepository;
 
+import java.util.List;
 import java.util.Optional;
 
 public interface AppUserRepository extends JpaRepository<AppUser, Long> {
@@ -11,4 +12,6 @@ public interface AppUserRepository extends JpaRepository<AppUser, Long> {
     boolean existsByUsername(String username);
     boolean existsByEmail(String email);
     boolean existsByEmailAndIdNot(String email, Long id);
+
+    List<AppUser> findTop20ByUsernameContainingIgnoreCaseOrderByUsernameAsc(String query);
 }

@@ -54,7 +54,16 @@ export default function AdminRoles() {
   const [selectedRoleId, setSelectedRoleId] = useState("");
   const [editChecked, setEditChecked] = useState({});
 
-  const [assignForm, setAssignForm] = useState({ userId: "", roleId: "" });
+  const [userSearch, setUserSearch] = useState("");
+  const [selectedUser, setSelectedUser] = useState(null);
+  const [assignRoleId, setAssignRoleId] = useState("");
+  const [removeRoleId, setRemoveRoleId] = useState("");
+  const [activityFilters, setActivityFilters] = useState({
+    userId: "",
+    actionType: "",
+    fromDate: "",
+    toDate: "",
+  });
 
   // ── Queries
   const rolesQuery = useQuery({
@@ -64,6 +73,23 @@ export default function AdminRoles() {
   const permissionsQuery = useQuery({
     queryKey: ["admin-permissions"],
     queryFn: bookingApi.adminPermissions,
+  });
+  const usersSearchQuery = useQuery({
+    queryKey: ["admin-users-search", userSearch],
+    queryFn: () => bookingApi.adminUsersSearch(userSearch),
+    enabled: userSearch.trim().length >= 2,
+  });
+  const activityLogsQuery = useQuery({
+    queryKey: ["admin-activity-logs", activityFilters],
+    queryFn: () =>
+      bookingApi.adminActivityLogs({
+        userId: activityFilters.userId || undefined,
+        actionType: activityFilters.actionType || undefined,
+        fromDate: activityFilters.fromDate || undefined,
+        toDate: activityFilters.toDate || undefined,
+        page: 0,
+        size: 20,
+      }),
   });
 
   const roles       = rolesQuery.data       || [];
@@ -111,10 +137,20 @@ export default function AdminRoles() {
 
   const assignRoleMutation = useMutation({
     mutationFn: ({ userId, roleId }) => bookingApi.adminAssignRoleToUser(userId, roleId),
+    onSuccess: (updatedUser) => {
+      setSelectedUser(updatedUser);
+      setAssignRoleId("");
+      queryClient.invalidateQueries({ queryKey: ["admin-activity-logs"] });
+    },
   });
 
   const removeRoleMutation = useMutation({
     mutationFn: ({ userId, roleId }) => bookingApi.adminRemoveRoleFromUser(userId, roleId),
+    onSuccess: (updatedUser) => {
+      setSelectedUser(updatedUser);
+      setRemoveRoleId("");
+      queryClient.invalidateQueries({ queryKey: ["admin-activity-logs"] });
+    },
   });
 
   const errorMessage =
@@ -124,7 +160,14 @@ export default function AdminRoles() {
     createPermissionMutation.error?.message ||
     replaceRolePermissionsMutation.error?.message ||
     assignRoleMutation.error?.message ||
-    removeRoleMutation.error?.message;
+    removeRoleMutation.error?.message ||
+    usersSearchQuery.error?.message ||
+    activityLogsQuery.error?.message;
+
+  const searchedUsers = usersSearchQuery.data || [];
+  const assignedRolesForUser = selectedUser?.roles ? Array.from(selectedUser.roles) : [];
+  const assignableRoles = roles.filter((r) => !assignedRolesForUser.includes(r.name));
+  const activityRows = activityLogsQuery.data?.content || [];
 
   // ── Checkbox helpers
   const toggle = (setter, key) =>
@@ -343,44 +386,97 @@ export default function AdminRoles() {
         </form>
       </div>
 
-      {/* ── Row 3: Assign / Remove role — merged panel ── */}
+      {/* ── Row 3: Assign / Remove role — searchable user picker ── */}
       <div className="panel user-role-panel">
         <h2>User role management</h2>
-        <p className="muted">Select a user ID and a role, then assign or remove it.</p>
+        <p className="muted">Search by user name, then assign or remove roles safely.</p>
 
-        <div className="user-role-fields">
+        <div className="user-role-fields user-role-fields--single">
           <label>
-            User ID
+            User name
             <input
-              value={assignForm.userId}
-              onChange={(e) => setAssignForm((c) => ({ ...c, userId: e.target.value }))}
-              inputMode="numeric"
-              placeholder="e.g. 42"
+              value={userSearch}
+              onChange={(e) => {
+                setUserSearch(e.target.value);
+                setSelectedUser(null);
+                setAssignRoleId("");
+                setRemoveRoleId("");
+              }}
+              placeholder="Type at least 2 letters..."
             />
           </label>
-          <label>
-            Role
-            <select
-              value={assignForm.roleId}
-              onChange={(e) => setAssignForm((c) => ({ ...c, roleId: e.target.value }))}
-            >
-              <option value="">Select role</option>
-              {roles.map((role) => (
-                <option key={role.id} value={role.id}>{role.name} (#{role.id})</option>
-              ))}
-            </select>
-          </label>
         </div>
+        {userSearch.trim().length >= 2 && (
+          <div className="manager-list" style={{ marginBottom: "1rem" }}>
+            {usersSearchQuery.isLoading ? (
+              <p className="muted">Searching users...</p>
+            ) : searchedUsers.length ? (
+              searchedUsers.map((u) => (
+                <article key={u.id} className="manager-row">
+                  <div>
+                    <strong>{u.username}</strong>
+                    <span>{u.email}</span>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-small btn-outline"
+                    onClick={() => {
+                      setSelectedUser(u);
+                      setUserSearch(u.username);
+                      setAssignRoleId("");
+                      setRemoveRoleId("");
+                    }}
+                  >
+                    Select
+                  </button>
+                </article>
+              ))
+            ) : (
+              <p className="muted">No matching users found.</p>
+            )}
+          </div>
+        )}
+
+        {selectedUser && (
+          <>
+            <p className="muted" style={{ marginBottom: "0.75rem" }}>
+              Selected user: <strong>{selectedUser.username}</strong> (#{selectedUser.id})
+            </p>
+            <div className="user-role-fields">
+              <label>
+                Add role (all available roles)
+                <select value={assignRoleId} onChange={(e) => setAssignRoleId(e.target.value)}>
+                  <option value="">Select role</option>
+                  {assignableRoles.map((role) => (
+                    <option key={role.id} value={role.id}>{role.name} (#{role.id})</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Remove role (assigned roles only)
+                <select value={removeRoleId} onChange={(e) => setRemoveRoleId(e.target.value)}>
+                  <option value="">Select assigned role</option>
+                  {assignedRolesForUser.map((roleName) => {
+                    const role = roles.find((r) => r.name === roleName);
+                    return role ? (
+                      <option key={role.id} value={role.id}>{role.name} (#{role.id})</option>
+                    ) : null;
+                  })}
+                </select>
+              </label>
+            </div>
+          </>
+        )}
 
         <div className="user-role-actions">
           <button
             type="button"
             className="btn btn-teal"
-            disabled={assignRoleMutation.isPending || !assignForm.userId || !assignForm.roleId}
+            disabled={assignRoleMutation.isPending || !selectedUser || !assignRoleId}
             onClick={() =>
               assignRoleMutation.mutate({
-                userId: Number(assignForm.userId),
-                roleId: Number(assignForm.roleId),
+                userId: Number(selectedUser.id),
+                roleId: Number(assignRoleId),
               })
             }
           >
@@ -390,11 +486,11 @@ export default function AdminRoles() {
           <button
             type="button"
             className="btn btn-danger"
-            disabled={removeRoleMutation.isPending || !assignForm.userId || !assignForm.roleId}
+            disabled={removeRoleMutation.isPending || !selectedUser || !removeRoleId}
             onClick={() =>
               removeRoleMutation.mutate({
-                userId: Number(assignForm.userId),
-                roleId: Number(assignForm.roleId),
+                userId: Number(selectedUser.id),
+                roleId: Number(removeRoleId),
               })
             }
           >
@@ -404,6 +500,69 @@ export default function AdminRoles() {
 
         {assignRoleMutation.isSuccess && <p className="success-msg">✓ Role assigned to user.</p>}
         {removeRoleMutation.isSuccess  && <p className="danger-msg">Role removed from user.</p>}
+      </div>
+
+      {/* ── Row 4: User activity analytics ── */}
+      <div className="panel user-role-panel">
+        <h2>User activity analytics</h2>
+        <p className="muted">Tracks actions from users with manager-level permissions.</p>
+        <div className="user-role-fields">
+          <label>
+            User ID
+            <input
+              value={activityFilters.userId}
+              onChange={(e) => setActivityFilters((c) => ({ ...c, userId: e.target.value }))}
+              placeholder="Optional"
+            />
+          </label>
+          <label>
+            Action
+            <select
+              value={activityFilters.actionType}
+              onChange={(e) => setActivityFilters((c) => ({ ...c, actionType: e.target.value }))}
+            >
+              <option value="">All actions</option>
+              <option value="CREATE">CREATE</option>
+              <option value="UPDATE">UPDATE</option>
+              <option value="DELETE">DELETE</option>
+              <option value="VIEW">VIEW</option>
+            </select>
+          </label>
+          <label>
+            From date
+            <input
+              type="date"
+              value={activityFilters.fromDate}
+              onChange={(e) => setActivityFilters((c) => ({ ...c, fromDate: e.target.value }))}
+            />
+          </label>
+          <label>
+            To date
+            <input
+              type="date"
+              value={activityFilters.toDate}
+              onChange={(e) => setActivityFilters((c) => ({ ...c, toDate: e.target.value }))}
+            />
+          </label>
+        </div>
+        {activityLogsQuery.isLoading ? (
+          <p className="muted">Loading activity logs...</p>
+        ) : activityRows.length ? (
+          <div className="manager-list">
+            {activityRows.map((row) => (
+              <article key={row.id} className="manager-row">
+                <div>
+                  <strong>{row.username} (#{row.userId})</strong>
+                  <span>{row.actionType} {row.resourceType ? `on ${row.resourceType}` : ""}{row.resourceId ? ` (${row.resourceId})` : ""}</span>
+                  <span className="muted">{new Date(row.createdAt).toLocaleString()}</span>
+                </div>
+                <span className="role-id">{row.httpMethod}</span>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <p className="muted">No activity logs match current filters.</p>
+        )}
       </div>
     </section>
   );
@@ -537,6 +696,9 @@ const styles = `
   grid-template-columns: 1fr 2fr;
   gap: 1rem;
   margin: 1rem 0;
+}
+.user-role-fields--single {
+  grid-template-columns: 1fr;
 }
 @media (max-width: 600px) {
   .user-role-fields { grid-template-columns: 1fr; }

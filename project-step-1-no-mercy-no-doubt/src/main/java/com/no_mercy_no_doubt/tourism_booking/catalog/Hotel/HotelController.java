@@ -2,11 +2,13 @@ package com.no_mercy_no_doubt.tourism_booking.catalog.Hotel;
 
 import com.no_mercy_no_doubt.tourism_booking.common.dto.PageResponse;
 import jakarta.validation.Valid;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDate;
 import java.util.List;
 
 @RestController
@@ -63,9 +65,16 @@ public class HotelController {
             @RequestParam(required = false) Integer size,
             @RequestParam(required = false) String name,
             @RequestParam(required = false) String city,
-            @RequestParam(required = false) String country) {
+            @RequestParam(required = false) String country,
+            @RequestParam(required = false) Integer guests,
+            @RequestParam(required = false) Integer adults,
+            @RequestParam(required = false) Integer children,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
         int pageNum = (page != null && page >= 0) ? page : 0;
         int pageSize = (size != null && size > 0) ? size : 10;
-        return ResponseEntity.ok(service.listHotelsWithFilters(city, country, name, pageNum, pageSize));
+        return ResponseEntity.ok(service.listHotelsWithFilters(
+                city, country, name, guests, adults, children, from, to, pageNum, pageSize
+        ));
     }
 }

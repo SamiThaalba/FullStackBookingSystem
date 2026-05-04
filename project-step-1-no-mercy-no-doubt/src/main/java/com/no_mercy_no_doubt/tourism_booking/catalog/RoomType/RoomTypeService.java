@@ -122,7 +122,7 @@ public class RoomTypeService {
     private void ensureCanManageHotel(Hotel hotel) {
         AppUser currentUser = currentUserProvider.getCurrentUser();
 
-        if (roleManagementService.userHasPermission(currentUser, "hotel:view_all")) {
+        if (roleManagementService.canBypassHotelScope(currentUser)) {
             return;
         }
         if (hotel.getOwnerId() != null && hotel.getOwnerId().equals(currentUser.getId())) {

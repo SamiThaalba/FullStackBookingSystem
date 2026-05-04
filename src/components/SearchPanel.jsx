@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { useBookingUi } from "../context/BookingUiContext";
 import { todayIso, tomorrowIso } from "../utils/dates";
 
 /**
@@ -19,12 +20,13 @@ export default function SearchPanel({
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const { bookingUi, updateBookingUi } = useBookingUi();
   const cityListboxId = useId();
   const [form, setForm] = useState({
-    city: initialValues.city ?? "",
-    from: initialValues.from || todayIso(),
-    to: initialValues.to || tomorrowIso(),
-    adults: Number(initialValues.adults || 2),
+    city: initialValues.city ?? bookingUi.city ?? "",
+    from: initialValues.from || bookingUi.checkInDate || todayIso(),
+    to: initialValues.to || bookingUi.checkOutDate || tomorrowIso(),
+    adults: Number(initialValues.adults || bookingUi.guests || 2),
     children: Number(initialValues.children || 0),
     rooms: Number(initialValues.rooms || 1),
     work: Boolean(initialValues.work || false),
@@ -54,6 +56,17 @@ export default function SearchPanel({
     document.addEventListener("pointerdown", handlePointerDown, true);
     return () => document.removeEventListener("pointerdown", handlePointerDown, true);
   }, []);
+
+  useEffect(() => {
+    setForm((current) => ({
+      ...current,
+      city: bookingUi.city || current.city,
+      from: bookingUi.checkInDate || current.from,
+      to: bookingUi.checkOutDate || current.to,
+      adults: bookingUi.guests || current.adults,
+    }));
+    console.info("[BookingUi] SearchPanel received shared state", bookingUi);
+  }, [bookingUi.city, bookingUi.checkInDate, bookingUi.checkOutDate, bookingUi.guests]);
 
   const guestsTotal = Math.max(1, Number(form.adults) + Number(form.children));
   const roomLabel = Number(form.rooms) === 1 ? t("search.roomSingular") : t("search.roomPlural");
@@ -87,6 +100,12 @@ export default function SearchPanel({
     if (form.work) query.set("work", "1");
     else query.delete("work");
     query.delete("page");
+    updateBookingUi({
+      city: form.city,
+      checkInDate: form.from,
+      checkOutDate: form.to,
+      guests: guestsTotal,
+    });
     navigate(`${navigateTo}?${query.toString()}`);
   }
 

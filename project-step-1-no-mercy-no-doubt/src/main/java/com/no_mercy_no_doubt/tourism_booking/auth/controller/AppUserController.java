@@ -26,6 +26,12 @@ public class AppUserController {
         return ResponseEntity.ok(userService.getAll());
     }
 
+    @GetMapping("/search")
+    @PreAuthorize("hasAuthority('user:manage')")
+    public ResponseEntity<List<UserResponse>> search(@RequestParam("q") String query) {
+        return ResponseEntity.ok(userService.searchByUsername(query));
+    }
+
     @GetMapping("/{id}")
     @PreAuthorize("hasAuthority('user:manage')")
     public ResponseEntity<UserResponse> getById(@PathVariable Long id) {

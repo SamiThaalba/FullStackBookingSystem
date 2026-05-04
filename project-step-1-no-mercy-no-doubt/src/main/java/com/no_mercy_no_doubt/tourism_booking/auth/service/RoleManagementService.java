@@ -17,12 +17,25 @@ import java.util.Collection;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
 public class RoleManagementService {
+
+    private static final Set<String> MANAGER_SCOPED_PERMISSIONS = Set.of(
+            "hotel:create",
+            "hotel:update",
+            "hotel:delete",
+            "room:create",
+            "room:update",
+            "room:delete",
+            "booking:update",
+            "booking:cancel",
+            "analytics:view"
+    );
 
     private final RoleRepository roleRepository;
     private final PermissionRepository permissionRepository;
@@ -137,6 +150,9 @@ public class RoleManagementService {
     }
 
     public boolean userHasPermission(AppUser user, String permissionName) {
+        if (permissionName == null) {
+            return false;
+        }
         for (Role role : user.getRoles()) {
             for (Permission permission : role.getPermissions()) {
                 if (permission.getName().equals(permissionName)) {
@@ -145,6 +161,20 @@ public class RoleManagementService {
             }
         }
         return false;
+    }
+
+    public boolean userHasManagerPermissions(AppUser user) {
+        Set<String> currentPermissions = user.getRoles().stream()
+                .flatMap(role -> role.getPermissions().stream())
+                .map(Permission::getName)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+
+        return currentPermissions.stream().anyMatch(MANAGER_SCOPED_PERMISSIONS::contains);
+    }
+
+    public boolean canBypassHotelScope(AppUser user) {
+        return userHasPermission(user, "hotel:view_all") && !userHasManagerPermissions(user);
     }
 
     public UserResponse toUserResponse(AppUser user) {

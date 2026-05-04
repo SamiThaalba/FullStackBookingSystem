@@ -6,6 +6,7 @@ import { bookingApi } from "../api/bookingApi";
 import { useAuth } from "../auth/AuthContext";
 import { storeBookingIntent } from "../auth/bookingIntent";
 import Alert from "../components/Alert";
+import { useBookingUi } from "../context/BookingUiContext";
 import { nightsBetween, todayIso, tomorrowIso } from "../utils/dates";
 import { compactAddress, money } from "../utils/format";
 import { hasValidHotelLatLng } from "../utils/geo";
@@ -20,13 +21,14 @@ export default function HotelDetails() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const auth = useAuth();
+  const { bookingUi, updateBookingUi } = useBookingUi();
   const queryClient = useQueryClient();
 
   const [selectedRoom, setSelectedRoom] = useState(null);
   const [dates, setDates] = useState({
-    checkIn: searchParams.get("from") || todayIso(),
-    checkOut: searchParams.get("to") || tomorrowIso(),
-    guests: Number(searchParams.get("guests") || 1),
+    checkIn: searchParams.get("from") || bookingUi.checkInDate || todayIso(),
+    checkOut: searchParams.get("to") || bookingUi.checkOutDate || tomorrowIso(),
+    guests: Number(searchParams.get("guests") || bookingUi.guests || 1),
   });
   const [quote, setQuote] = useState(null);
   const [paymentOpen, setPaymentOpen] = useState(false);
@@ -132,6 +134,15 @@ export default function HotelDetails() {
       guests: Number(resumeIntent.guests || current.guests),
     }));
   }, [rooms, selectedRoom]);
+
+  useEffect(() => {
+    updateBookingUi({
+      checkInDate: dates.checkIn,
+      checkOutDate: dates.checkOut,
+      guests: Number(dates.guests),
+    });
+    console.info("[BookingUi] HotelDetails dates synced", dates);
+  }, [dates.checkIn, dates.checkOut, dates.guests, updateBookingUi]);
 
   if (hotelQuery.isLoading) {
     return <div className="container empty-state">{t("hotelDetail.loadingHotel")}</div>;

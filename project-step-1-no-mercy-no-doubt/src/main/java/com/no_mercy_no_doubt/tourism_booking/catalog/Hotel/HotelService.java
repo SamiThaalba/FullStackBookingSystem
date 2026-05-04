@@ -3,8 +3,11 @@ package com.no_mercy_no_doubt.tourism_booking.catalog.Hotel;
 import com.no_mercy_no_doubt.tourism_booking.auth.entity.AppUser;
 import com.no_mercy_no_doubt.tourism_booking.auth.repository.AppUserRepository;
 import com.no_mercy_no_doubt.tourism_booking.auth.service.RoleManagementService;
+import com.no_mercy_no_doubt.tourism_booking.catalog.Booking.BookingRepository;
 import com.no_mercy_no_doubt.tourism_booking.catalog.geography.City;
 import com.no_mercy_no_doubt.tourism_booking.catalog.geography.CityRepository;
+import com.no_mercy_no_doubt.tourism_booking.catalog.RoomType.RoomType;
+import com.no_mercy_no_doubt.tourism_booking.catalog.RoomType.RoomTypeRepository;
 import com.no_mercy_no_doubt.tourism_booking.common.dto.PageResponse;
 import com.no_mercy_no_doubt.tourism_booking.common.exception.BusinessException;
 import com.no_mercy_no_doubt.tourism_booking.common.exception.ResourceNotFoundException;
@@ -17,6 +20,7 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.util.List;
 
 @Service
@@ -29,13 +33,15 @@ public class HotelService {
     private final AppUserRepository userRepository;
     private final RoleManagementService roleManagementService;
     private final CurrentUserProvider currentUserProvider;
+    private final RoomTypeRepository roomTypeRepository;
+    private final BookingRepository bookingRepository;
 
     @Transactional
     public HotelResponse createHotel(HotelRequest request) {
         AppUser currentUser = currentUserProvider.getCurrentUser();
 
         if (request.getManagerId() == null
-                && !roleManagementService.userHasPermission(currentUser, "hotel:view_all")) {
+                && !roleManagementService.canBypassHotelScope(currentUser)) {
             request.setManagerId(currentUser.getId());
         }
 
@@ -70,7 +76,53 @@ public class HotelService {
 
     @Transactional(readOnly = true)
     public PageResponse<HotelResponse> listHotelsWithFilters(String city, String country, String name,
+                                                             Integer guests, Integer adults, Integer children,
+                                                             LocalDate from, LocalDate to,
                                                              int page, int size) {
+        Integer effectiveGuests = resolveGuests(guests, adults, children);
+        validateDateRange(from, to);
+
+        if (effectiveGuests == null && from == null && to == null) {
+            return listHotelsBasic(city, country, name, page, size);
+        }
+
+        String cityParam = blankToNull(city);
+        String countryParam = blankToNull(country);
+        String nameParam = blankToNull(name);
+        String cityPattern = cityParam == null ? null : "%" + cityParam + "%";
+        String countryPattern = countryParam == null ? null : "%" + countryParam + "%";
+        String namePattern = nameParam == null ? null : "%" + nameParam + "%";
+
+        // We must filter by room availability/capacity in memory for now.
+        List<Hotel> candidates = hotelRepository.findByFilters(
+                cityPattern, countryPattern, namePattern, PageRequest.of(0, 2000)
+        ).getContent();
+
+        List<Hotel> filtered = candidates.stream()
+                .filter(hotel -> matchesGuestAndAvailability(hotel.getId(), effectiveGuests, from, to))
+                .toList();
+
+        int total = filtered.size();
+        int fromIndex = Math.min(page * size, total);
+        int toIndex = Math.min(fromIndex + size, total);
+        List<HotelResponse> content = filtered.subList(fromIndex, toIndex).stream()
+                .map(h -> mapper.toHotelResponse(h, false))
+                .toList();
+
+        int totalPages = size == 0 ? 1 : (int) Math.ceil(total / (double) size);
+
+        return PageResponse.<HotelResponse>builder()
+                .content(content)
+                .page(page)
+                .size(size)
+                .totalElements(total)
+                .totalPages(totalPages)
+                .first(page == 0)
+                .last(page >= Math.max(0, totalPages - 1))
+                .build();
+    }
+
+    private PageResponse<HotelResponse> listHotelsBasic(String city, String country, String name, int page, int size) {
         Pageable pageable = PageRequest.of(page, size);
         String cityParam = blankToNull(city);
         String countryParam = blankToNull(country);
@@ -95,10 +147,46 @@ public class HotelService {
                 .build();
     }
 
+    private boolean matchesGuestAndAvailability(Long hotelId, Integer guests, LocalDate from, LocalDate to) {
+        List<RoomType> roomTypes = roomTypeRepository.findByHotelId(hotelId);
+        for (RoomType room : roomTypes) {
+            if (guests != null && room.getCapacity() < guests) {
+                continue;
+            }
+            if (from != null && to != null) {
+                long overlapping = bookingRepository.countActiveOverlappingBookings(room.getId(), from, to);
+                if (overlapping >= room.getInventoryCount()) {
+                    continue;
+                }
+            }
+            return true;
+        }
+        return false;
+    }
+
+    private Integer resolveGuests(Integer guests, Integer adults, Integer children) {
+        if (guests != null && guests > 0) {
+            return guests;
+        }
+        int adultCount = adults != null ? Math.max(0, adults) : 0;
+        int childrenCount = children != null ? Math.max(0, children) : 0;
+        int total = adultCount + childrenCount;
+        return total > 0 ? total : null;
+    }
+
+    private void validateDateRange(LocalDate from, LocalDate to) {
+        if ((from == null && to != null) || (from != null && to == null)) {
+            throw new BusinessException("Both check-in and check-out dates are required when filtering by date.");
+        }
+        if (from != null && to != null && !to.isAfter(from)) {
+            throw new BusinessException("Check-out date must be after check-in date.");
+        }
+    }
+
     @Transactional(readOnly = true)
     public List<HotelResponse> getMyHotels() {
         AppUser currentUser = currentUserProvider.getCurrentUser();
-        if (roleManagementService.userHasPermission(currentUser, "hotel:view_all")) {
+        if (roleManagementService.canBypassHotelScope(currentUser)) {
             return hotelRepository.findAll().stream()
                     .map(h -> mapper.toHotelResponse(h, false))
                     .toList();
@@ -182,7 +270,7 @@ public class HotelService {
     private void ensureCanManageHotel(Hotel hotel) {
         AppUser currentUser = currentUserProvider.getCurrentUser();
 
-        if (roleManagementService.userHasPermission(currentUser, "hotel:view_all")) {
+        if (roleManagementService.canBypassHotelScope(currentUser)) {
             return;
         }
         if (hotel.getOwnerId() != null && hotel.getOwnerId().equals(currentUser.getId())) {
@@ -200,7 +288,7 @@ public class HotelService {
 
         AppUser currentUser = currentUserProvider.getCurrentUser();
 
-        if (roleManagementService.userHasPermission(currentUser, "hotel:view_all")) {
+        if (roleManagementService.canBypassHotelScope(currentUser)) {
             return;
         }
 

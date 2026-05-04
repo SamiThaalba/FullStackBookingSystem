@@ -226,7 +226,7 @@ public class AnalyticsService {
     private void ensureCanAccessManagerDashboard(Long managerId) {
         AppUser currentUser = currentUserProvider.getCurrentUser();
 
-        if (roleManagementService.userHasPermission(currentUser, "hotel:view_all")) {
+        if (roleManagementService.canBypassHotelScope(currentUser)) {
             return;
         }
 
@@ -240,7 +240,7 @@ public class AnalyticsService {
     private void ensureCanAccessHotel(Hotel hotel) {
         AppUser currentUser = currentUserProvider.getCurrentUser();
 
-        if (roleManagementService.userHasPermission(currentUser, "hotel:view_all")) {
+        if (roleManagementService.canBypassHotelScope(currentUser)) {
             return;
         }
 
