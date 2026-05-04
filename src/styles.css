@@ -2912,6 +2912,7 @@ button.notif-row--btn:disabled {
 .home-ai__actions {
   position: relative;
   display: grid;
+  align-items: center;
   grid-template-columns: 1fr auto;
   gap: 10px;
   border-top: 1px solid var(--line);
