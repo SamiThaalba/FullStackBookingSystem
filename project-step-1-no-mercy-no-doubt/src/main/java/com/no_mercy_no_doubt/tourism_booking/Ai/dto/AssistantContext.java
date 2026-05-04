@@ -10,5 +10,7 @@ public class AssistantContext {
     private Integer guests;
     private Long selectedHotelId;
     private String selectedHotelName;
+    private Long selectedRoomTypeId;
+    private String selectedRoomTypeName;
     private String mode;
 }

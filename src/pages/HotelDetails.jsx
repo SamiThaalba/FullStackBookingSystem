@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { bookingApi } from "../api/bookingApi";
 import { useAuth } from "../auth/AuthContext";
 import { storeBookingIntent } from "../auth/bookingIntent";
@@ -19,6 +19,7 @@ export default function HotelDetails() {
   const { t } = useTranslation();
   const { hotelId } = useParams();
   const [searchParams] = useSearchParams();
+  const location = useLocation();
   const navigate = useNavigate();
   const auth = useAuth();
   const { bookingUi, updateBookingUi } = useBookingUi();
@@ -118,8 +119,12 @@ export default function HotelDetails() {
     wishlistHotelEnabled,
   );
 
-  const rooms = roomQuery.data || hotel?.roomTypes || [];
+  const rooms = (roomQuery.data || hotel?.roomTypes || []).filter((room) => {
+    const name = String(room?.name || "").trim().toLowerCase();
+    return Boolean(name) && name !== "room type name is required.";
+  });
   const nights = nightsBetween(dates.checkIn, dates.checkOut);
+  const aiFocusRooms = searchParams.get("ai") === "1";
 
   useEffect(() => {
     const resumeIntent = window.history.state?.usr?.intent || null;
@@ -134,6 +139,12 @@ export default function HotelDetails() {
       guests: Number(resumeIntent.guests || current.guests),
     }));
   }, [rooms, selectedRoom]);
+
+  useEffect(() => {
+    if (!aiFocusRooms || !rooms.length) return;
+    const roomSection = document.getElementById("room-types");
+    roomSection?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [aiFocusRooms, rooms.length, location.key]);
 
   useEffect(() => {
     updateBookingUi({
@@ -224,11 +235,19 @@ export default function HotelDetails() {
 
           <div className="split-grid">
             <div>
-              <h2>{t("hotelDetail.roomTypesHeading")}</h2>
+              <h2 id="room-types">{t("hotelDetail.roomTypesHeading")}</h2>
+              {aiFocusRooms ? (
+                <p className="muted" style={{ marginBottom: "10px" }}>
+                  AI assistant opened this section. Choose a room type to continue booking.
+                </p>
+              ) : null}
               <Alert type="error">{quoteMutation.error?.message || bookingMutation.error?.message}</Alert>
               <div className="room-list">
                 {rooms.map((room) => (
-                  <article className="room-card" key={room.id}>
+                  <article
+                    className={`room-card ${Number(selectedRoom?.id) === Number(room.id) ? "room-card--selected" : ""}`}
+                    key={room.id}
+                  >
                     <div>
                       <h3>{room.name}</h3>
                       <p>{room.description || t("hotelDetail.defaultRoomDescription")}</p>
