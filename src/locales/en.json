@@ -119,8 +119,7 @@
     "noResultsBody": "Try another city or another filter.",
     "previous": "Previous",
     "next": "Next",
-    "viewHotel":"View hotel",
-
+    "viewHotel": "View hotel",
     "pageOf": "Page {{page}} of {{total}}"
   },
   "hotelDetail": {
@@ -239,5 +238,30 @@
     "viewDetails": "View details",
     "addToFav": "Add to favorites",
     "removeFromFav": "Remove from favorites"
+  },
+  "assistant": {
+    "titleHome": "AI Booking Concierge",
+    "brandAria": "AI Assistant",
+    "badgeText": "AI",
+    "badgeAria": "Artificial Intelligence assistant",
+    "hintHome": "Tell me where/when — I’ll search and prepare booking steps.",
+    "hintHotels": "Using current discover/booking context.",
+    "emptyTitle": "Describe your trip.",
+    "emptyBody": "City, dates, guests, and your vibe. I’ll do the rest.",
+    "quickPromptsAria": "Quick prompts",
+    "prompt1Label": "Ramallah • tomorrow • 2 guests",
+    "prompt1Text": "Find me a hotel in Ramallah from today to tomorrow for 2 guests.",
+    "prompt2Label": "Budget • next weekend",
+    "prompt2Text": "Show me a budget-friendly hotel in Nablus next weekend.",
+    "prompt3Label": "Family • 3 nights",
+    "prompt3Text": "I want a family-friendly stay in Bethlehem tell today for 3 nights.",
+    "inputPlaceholder": "Ask: “Book me a hotel in Jericho for Friday”",
+    "send": "Send",
+    "thinking": "Thinking...",
+    "selectPayment": "Select payment method",
+    "paymentCard": "Card (auto-filled)",
+    "confirmBooking": "Confirm booking",
+    "cancel": "Cancel",
+    "reset": "New Chat"
   }
 }

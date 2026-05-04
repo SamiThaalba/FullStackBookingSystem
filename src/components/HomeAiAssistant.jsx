@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
 import { bookingApi } from "../api/bookingApi";
 import { useAuth } from "../auth/AuthContext";
@@ -43,44 +44,69 @@ function humanizeError(err) {
   return err.message || "I hit an issue while processing your request.";
 }
 
+/** Small animated typing indicator — three bouncing dots */
 function TypingIndicator() {
   return (
-    <div className="assistant-row assistant-row--bot">
-      <div className="assistant-botAvatar" aria-hidden>
+    <div className="home-ai__row home-ai__row--bot">
+      <div className="home-ai__botAvatar" aria-hidden>
         <img src="/ai_assistant_logo.png" alt="" />
       </div>
-      <div className="assistant-msg assistant-msg--typing" aria-label="Assistant is thinking">
-        <span className="assistant-dot" />
-        <span className="assistant-dot" />
-        <span className="assistant-dot" />
+      <div className="home-ai__msg home-ai__msg--bot home-ai__msg--typing" aria-label="Assistant is thinking">
+        <span className="home-ai__dot" />
+        <span className="home-ai__dot" />
+        <span className="home-ai__dot" />
       </div>
     </div>
   );
 }
 
-export default function BookingAssistant() {
+/** Renders context the AI has accumulated as dismissable pills */
+function ContextPills({ context, onClear }) {
+  const pills = [];
+  if (context?.city) pills.push({ key: "city", icon: "📍", label: context.city });
+  if (context?.guests) pills.push({ key: "guests", icon: "👥", label: `${context.guests} guest${context.guests > 1 ? "s" : ""}` });
+  if (context?.checkIn) pills.push({ key: "checkIn", icon: "📅", label: context.checkIn });
+  if (context?.checkOut) pills.push({ key: "checkOut", icon: "🏁", label: context.checkOut });
+  if (!pills.length) return null;
+  return (
+    <div className="home-ai__contextRow" aria-label="Active booking context">
+      {pills.map((p) => (
+        <span key={p.key} className="home-ai__contextPill">
+          <span aria-hidden>{p.icon}</span> {p.label}
+        </span>
+      ))}
+      <button
+        type="button"
+        className="home-ai__contextClear"
+        onClick={onClear}
+        title="Clear context"
+        aria-label="Clear booking context"
+      >
+        ✕
+      </button>
+    </div>
+  );
+}
+
+export default function HomeAiAssistant({ cities: _cities } = {}) {
+  const { t } = useTranslation();
   const auth = useAuth();
   const { updateBookingUi } = useBookingUi();
   const navigate = useNavigate();
   const location = useLocation();
   const initialMemory = useMemo(() => loadMemory(), []);
-  const [open, setOpen] = useState(false);
   const [message, setMessage] = useState("");
   const [chat, setChat] = useState(() => initialMemory.history);
   const [context, setContext] = useState(() => initialMemory.context);
   const [loading, setLoading] = useState(false);
   const [confirmDraft, setConfirmDraft] = useState(null);
-  const wasAuthenticatedRef = useRef(Boolean(auth.isAuthenticated));
   const scrollerRef = useRef(null);
   const inputRef = useRef(null);
-
-  const canUseAssistant = true;
+  const wasAuthenticatedRef = useRef(Boolean(auth.isAuthenticated));
 
   const bookingContextHint = location.pathname.startsWith("/hotels")
-    ? "Using current discover/booking context."
-    : "I can search hotels and complete booking steps for you.";
-
-  if (!canUseAssistant) return null;
+    ? t("assistant.hintHotels")
+    : t("assistant.hintHome");
 
   useEffect(() => {
     const wasAuthenticated = wasAuthenticatedRef.current;
@@ -94,22 +120,17 @@ export default function BookingAssistant() {
     wasAuthenticatedRef.current = isAuthenticated;
   }, [auth.isAuthenticated]);
 
-  useEffect(() => {
-    if (open) {
-      queueMicrotask(() => {
-        scrollerRef.current?.scrollTo({ top: scrollerRef.current.scrollHeight, behavior: "smooth" });
-        inputRef.current?.focus();
-      });
-    }
-  }, [open]);
+  function scrollToBottom() {
+    queueMicrotask(() => {
+      scrollerRef.current?.scrollTo({ top: scrollerRef.current.scrollHeight, behavior: "smooth" });
+    });
+  }
 
   function pushTurn(role, content, nextChat = chat) {
     const updated = [...nextChat, { role, content }];
     setChat(updated);
     saveMemory({ context, history: updated });
-    queueMicrotask(() => {
-      scrollerRef.current?.scrollTo({ top: scrollerRef.current.scrollHeight, behavior: "smooth" });
-    });
+    scrollToBottom();
     return updated;
   }
 
@@ -191,7 +212,9 @@ export default function BookingAssistant() {
       .sort((a, b) => Number(a.basePrice || 0) - Number(b.basePrice || 0))[0];
 
     if (!room) {
-      throw new Error(`I found ${hotelName || hotel?.name || "the hotel"}, but there is no suitable room for ${guests} guest(s).`);
+      throw new Error(
+        `I found ${hotelName || hotel?.name || "the hotel"}, but there is no suitable room for ${guests} guest(s).`,
+      );
     }
 
     const quote = await bookingApi.checkAvailability({
@@ -220,6 +243,7 @@ export default function BookingAssistant() {
     const text = (overrideText ?? message).trim();
     if (!text || loading) return;
     setMessage("");
+    inputRef.current?.focus();
     const withUser = pushTurn("user", text);
     setLoading(true);
 
@@ -301,25 +325,6 @@ export default function BookingAssistant() {
     setLoading(true);
     const baseChat = [...chat];
     try {
-      try {
-        const myBookings = await bookingApi.myBookings();
-        const duplicate = (myBookings || []).some(
-          (b) =>
-            Number(b.hotelId) === Number(confirmDraft.hotel.id) &&
-            Number(b.roomTypeId) === Number(confirmDraft.room.id) &&
-            b.startDate === confirmDraft.checkIn &&
-            b.endDate === confirmDraft.checkOut &&
-            b.status !== "CANCELLED",
-        );
-        if (duplicate) {
-          pushTurn("assistant", "I stopped because this booking already exists in your account.", baseChat);
-          setConfirmDraft(null);
-          return;
-        }
-      } catch {
-        // If duplicate-check endpoint is unavailable for this user, continue with booking attempt.
-      }
-
       const booking = await bookingApi.createBooking({
         hotelId: Number(confirmDraft.hotel.id),
         roomTypeId: Number(confirmDraft.room.id),
@@ -349,145 +354,171 @@ export default function BookingAssistant() {
     setChat([]);
     setConfirmDraft(null);
     saveMemory({ context: {}, history: [] });
+    inputRef.current?.focus();
   }
 
-  const hasUnread = !open && chat.length > 0 && chat[chat.length - 1]?.role === "assistant";
+  function clearContext() {
+    setContext({});
+    saveMemory({ context: {}, history: chat });
+  }
 
   return (
-    <div className="assistant-shell">
-      {/* Floating toggle button */}
-      <button
-        type="button"
-        className={`assistant-toggle ${open ? "assistant-toggle--open" : ""}`}
-        onClick={() => setOpen((v) => !v)}
-        aria-label={open ? "Close AI assistant" : "Open AI assistant"}
-      >
-        {open ? (
-          <svg width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden>
-            <path d="M5 5l10 10M15 5L5 15" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"/>
-          </svg>
-        ) : (
-          <>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
-              <path d="M12 2C6.48 2 2 6.48 2 12c0 1.85.5 3.58 1.38 5.06L2 22l4.94-1.38A9.96 9.96 0 0012 22c5.52 0 10-4.48 10-10S17.52 2 12 2z" fill="currentColor" opacity=".18"/>
-              <path d="M8 12h8M8 8h5M8 16h4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
-            </svg>
-            <span>AI Assistant</span>
-            {hasUnread && <span className="assistant-toggle__dot" aria-hidden />}
-          </>
-        )}
-      </button>
+    <section className="home-ai">
+      <div className="home-ai__glow" aria-hidden />
 
-      {open && (
-        <section className="assistant-panel">
-          {/* Header */}
-          <div className="assistant-head">
-            <div className="assistant-head__brand">
-              <div className="assistant-head__avatar">
-                <img src="/ai_assistant_logo.png" alt="" />
+      {/* ── Header ── */}
+      <header className="home-ai__head">
+        <div className="home-ai__headRow">
+          <div className="home-ai__brand" aria-label={t("assistant.brandAria")}>
+            <span className="home-ai__logoWrap" aria-hidden>
+              <img className="home-ai__logo" src="/ai_assistant_logo.png" alt="" />
+              <span className="home-ai__pulse" aria-hidden />
+            </span>
+            <div className="home-ai__title">
+              <div className="home-ai__titleLine">
+                <strong>{t("assistant.titleHome")}</strong>
+                <span className="home-ai__badge" aria-label={t("assistant.badgeAria")}>
+                  {t("assistant.badgeText")}
+                </span>
               </div>
-              <div>
-                <strong>AI Booking Concierge</strong>
-                <span className="muted">{bookingContextHint}</span>
+              <span className="muted">{bookingContextHint}</span>
+            </div>
+          </div>
+          {/* New Chat button in header (matches "after" design) */}
+          <button
+            type="button"
+            className="home-ai__newChat"
+            onClick={resetConversation}
+            disabled={loading}
+            aria-label={t("assistant.reset")}
+          >
+            <svg width="13" height="13" viewBox="0 0 14 14" fill="none" aria-hidden>
+              <path d="M7 1v6m0 0v6m0-6H1m6 0h6" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+            </svg>
+            {t("assistant.reset")}
+          </button>
+        </div>
+      </header>
+
+      {/* ── Messages ── */}
+      <div className="home-ai__messages" ref={scrollerRef}>
+        {chat.length === 0 ? (
+          <div className="home-ai__empty">
+            <div className="home-ai__emptyHero" aria-hidden>
+              <img className="home-ai__emptyLogo" src="/ai_assistant_logo.png" alt="" />
+            </div>
+            <p className="home-ai__emptyTitle">{t("assistant.emptyTitle")}</p>
+            <p className="muted">{t("assistant.emptyBody")}</p>
+          </div>
+        ) : (
+          chat.map((m, i) => (
+            <div
+              key={`${m.role}-${i}`}
+              className={`home-ai__row ${m.role === "assistant" ? "home-ai__row--bot" : "home-ai__row--user"}`}
+            >
+              {m.role === "assistant" && (
+                <div className="home-ai__botAvatar" aria-hidden>
+                  <img src="/ai_assistant_logo.png" alt="" />
+                </div>
+              )}
+              <div className={m.role === "assistant" ? "home-ai__msg home-ai__msg--bot" : "home-ai__msg home-ai__msg--user"}>
+                {m.content}
               </div>
             </div>
-            <button
-              type="button"
-              className="assistant-head__newChat"
-              onClick={resetConversation}
+          ))
+        )}
+        {/* Typing indicator while AI is responding */}
+        {loading && <TypingIndicator />}
+      </div>
+
+      {/* ── Active context pills ── */}
+      <ContextPills context={context} onClear={clearContext} />
+
+      {/* ── Quick prompt chips ── */}
+      <div className="home-ai__chips" aria-label={t("assistant.quickPromptsAria")}>
+        <button
+          type="button"
+          className="home-ai__chip"
+          onClick={() => sendMessage(t("assistant.prompt1Text"))}
+          disabled={loading}
+        >
+          <span aria-hidden>📍</span> {t("assistant.prompt1Label")}
+        </button>
+
+        <button
+          type="button"
+          className="home-ai__chip"
+          onClick={() => sendMessage(t("assistant.prompt2Text"))}
+          disabled={loading}
+        >
+          <span aria-hidden>💰</span> {t("assistant.prompt2Label")}
+        </button>
+
+        <button
+          type="button"
+          className="home-ai__chip"
+          onClick={() => sendMessage(t("assistant.prompt3Text"))}
+          disabled={loading}
+        >
+          <span aria-hidden>👨‍👩‍👧</span> {t("assistant.prompt3Label")}
+        </button>
+      </div>
+
+      {/* ── Input row ── */}
+      <div className="home-ai__actions">
+        <input
+          ref={inputRef}
+          value={message}
+          onChange={(e) => setMessage(e.target.value)}
+          placeholder={t("assistant.inputPlaceholder")}
+          disabled={loading}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              sendMessage();
+            }
+          }}
+        />
+        <button
+          type="button"
+          className="home-ai__sendBtn"
+          onClick={() => sendMessage()}
+          disabled={loading || !message.trim()}
+          aria-label={t("assistant.send")}
+        >
+          {loading ? (
+            <span className="home-ai__sendSpinner" aria-hidden />
+          ) : (
+            <svg width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden>
+              <path d="M3 10L17 3l-7 7 7 7-14-7z" fill="currentColor"/>
+            </svg>
+          )}
+        </button>
+      </div>
+
+      {/* ── Booking confirmation panel ── */}
+      <div className="home-ai__confirm">
+        {confirmDraft ? (
+          <>
+            <select
+              value={confirmDraft.paymentMethod || ""}
+              onChange={(e) =>
+                setConfirmDraft((current) => (current ? { ...current, paymentMethod: e.target.value } : current))
+              }
               disabled={loading}
-              aria-label="New Chat"
-              title="New Chat"
             >
-              <svg width="12" height="12" viewBox="0 0 14 14" fill="none" aria-hidden>
-                <path d="M7 1v6m0 0v6m0-6H1m6 0h6" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
-              </svg>
-              New Chat
+              <option value="">{t("assistant.selectPayment")}</option>
+              <option value="mock_card">{t("assistant.paymentCard")}</option>
+            </select>
+            <button type="button" className="btn btn-primary" onClick={confirmBooking} disabled={loading}>
+              {t("assistant.confirmBooking")}
             </button>
-          </div>
-
-          {/* Messages */}
-          <div className="assistant-messages" ref={scrollerRef}>
-            {chat.length === 0 ? (
-              <p className="muted" style={{ padding: "8px 0", textAlign: "center", fontSize: "0.88rem" }}>
-                Tell me what you want, and I'll handle search, follow-ups, and booking steps.
-              </p>
-            ) : (
-              chat.map((m, i) => (
-                <div key={`${m.role}-${i}`} className={`assistant-row ${m.role === "assistant" ? "assistant-row--bot" : "assistant-row--user"}`}>
-                  {m.role === "assistant" && (
-                    <div className="assistant-botAvatar" aria-hidden>
-                      <img src="/ai_assistant_logo.png" alt="" />
-                    </div>
-                  )}
-                  <div className={m.role === "assistant" ? "assistant-msg" : "user-msg"}>
-                    {m.content}
-                  </div>
-                </div>
-              ))
-            )}
-            {loading && <TypingIndicator />}
-          </div>
-
-          {/* Input row */}
-          <div className="assistant-actions">
-            <input
-              ref={inputRef}
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              placeholder="e.g. Book me a hotel in Ramallah for tomorrow"
-              disabled={loading}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  sendMessage();
-                }
-              }}
-            />
-            <button
-              type="button"
-              className="assistant-sendBtn"
-              onClick={() => sendMessage()}
-              disabled={loading || !message.trim()}
-              aria-label="Send"
-            >
-              {loading ? (
-                <span className="assistant-sendSpinner" aria-hidden />
-              ) : (
-                <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden>
-                  <path d="M3 10L17 3l-7 7 7 7-14-7z" fill="currentColor"/>
-                </svg>
-              )}
+            <button type="button" className="btn btn-outline" onClick={() => setConfirmDraft(null)} disabled={loading}>
+              {t("assistant.cancel")}
             </button>
-          </div>
-
-          {/* Confirm / payment */}
-          <div className="assistant-confirm">
-            {confirmDraft ? (
-              <>
-                <select
-                  value={confirmDraft.paymentMethod || ""}
-                  onChange={(e) =>
-                    setConfirmDraft((current) =>
-                      current ? { ...current, paymentMethod: e.target.value } : current,
-                    )
-                  }
-                  disabled={loading}
-                >
-                  <option value="">Select payment method</option>
-                  <option value="mock_card">Card (auto-filled)</option>
-                </select>
-                <button type="button" className="btn btn-primary btn-small" onClick={confirmBooking} disabled={loading}>
-                  Confirm booking
-                </button>
-                <button type="button" className="btn btn-outline btn-small" onClick={() => setConfirmDraft(null)} disabled={loading}>
-                  Cancel
-                </button>
-              </>
-            ) : null}
-          </div>
-        </section>
-      )}
-    </div>
+          </>
+        ) : null}
+      </div>
+    </section>
   );
 }

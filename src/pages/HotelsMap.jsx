@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Link, useSearchParams } from "react-router-dom";
 import { bookingApi } from "../api/bookingApi";
 import { buildSearchCityRows } from "../utils/searchCities";
+import { resolveCityBilingual, resolveCountryBilingual } from "../utils/aiAssistant";
 import Alert from "../components/Alert";
 import SearchPanel from "../components/SearchPanel";
 import { FaListUl } from "react-icons/fa";
@@ -41,11 +42,11 @@ async function fetchAllHotelsMatchingFilters(filterFields) {
 export default function HotelsMap() {
   const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
-  const country = searchParams.get("country") || "";
+  const country = resolveCountryBilingual(searchParams.get("country") || "");
 
   const filterFields = useMemo(
     () => ({
-      city: searchParams.get("city") || "",
+      city: resolveCityBilingual(searchParams.get("city") || ""),
       country,
       name: searchParams.get("name") || "",
     }),

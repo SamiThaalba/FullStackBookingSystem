@@ -2,6 +2,7 @@ import { Fragment, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useBookingUi } from "../context/BookingUiContext";
+import { resolveCityBilingual } from "../utils/aiAssistant";
 import { todayIso, tomorrowIso } from "../utils/dates";
 
 /**
@@ -90,7 +91,8 @@ export default function SearchPanel({
   function submit(event) {
     event.preventDefault();
     const query = new URLSearchParams(searchParams);
-    query.set("city", form.city);
+    const cityCanonical = resolveCityBilingual(form.city);
+    query.set("city", cityCanonical);
     query.set("from", form.from);
     query.set("to", form.to);
     query.set("guests", String(guestsTotal));
@@ -101,7 +103,7 @@ export default function SearchPanel({
     else query.delete("work");
     query.delete("page");
     updateBookingUi({
-      city: form.city,
+      city: cityCanonical,
       checkInDate: form.from,
       checkOutDate: form.to,
       guests: guestsTotal,

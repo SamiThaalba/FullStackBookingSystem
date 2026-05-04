@@ -2,7 +2,7 @@ import { lazy, Suspense, useMemo } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
-import SearchPanel from "../components/SearchPanel";
+import HomeAiAssistant from "../components/HomeAiAssistant";
 import { useAuth } from "../auth/AuthContext";
 import { bookingApi } from "../api/bookingApi";
 import { hasValidHotelLatLng } from "../utils/geo";
@@ -76,7 +76,7 @@ export default function Home() {
             </div>
           </div>
           <div className="hero-card">
-            <SearchPanel cities={searchCityRows} />
+            <HomeAiAssistant cities={searchCityRows} />
           </div>
         </div>
       </section>

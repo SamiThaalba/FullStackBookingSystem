@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Link, useSearchParams } from "react-router-dom";
 import { bookingApi } from "../api/bookingApi";
 import { buildSearchCityRows } from "../utils/searchCities";
+import { resolveCityBilingual, resolveCountryBilingual } from "../utils/aiAssistant";
 import Alert from "../components/Alert";
 import HotelCard from "../components/HotelCard";
 import SearchPanel from "../components/SearchPanel";
@@ -15,8 +16,8 @@ export default function Hotels() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { updateBookingUi } = useBookingUi();
   const page = Number(searchParams.get("page") || 0) || 0;
-  const country = searchParams.get("country") || "";
-  const city = searchParams.get("city") || "";
+  const country = resolveCountryBilingual(searchParams.get("country") || "");
+  const city = resolveCityBilingual(searchParams.get("city") || "");
   const from = searchParams.get("from") || "";
   const to = searchParams.get("to") || "";
   const guests = Number(searchParams.get("guests") || 1);

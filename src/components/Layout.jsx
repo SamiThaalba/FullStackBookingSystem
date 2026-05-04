@@ -1,4 +1,4 @@
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
@@ -15,6 +15,7 @@ export default function Layout() {
   const { t, i18n } = useTranslation();
   const auth = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const notificationsNavEnabled =
     auth.isAuthenticated && auth.hasPermission("notification:view");
@@ -127,7 +128,7 @@ export default function Layout() {
       <main>
         <Outlet />
       </main>
-      <BookingAssistant />
+      {location.pathname === "/" ? null : <BookingAssistant />}
 
       <footer className="site-footer">
         <div className="container footer-grid">

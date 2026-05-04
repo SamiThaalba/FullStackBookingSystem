@@ -4,6 +4,8 @@
  * @param {Array<{ city?: string, country?: string }>} hotels
  * @returns {{ name: string, countryName: string }[]}
  */
+import { extendBilingualCityRows } from "./aiAssistant";
+
 export function buildSearchCityRows(cityDtos = [], hotels = []) {
   const rows = [];
   const seen = new Set();
@@ -28,5 +30,5 @@ export function buildSearchCityRows(cityDtos = [], hotels = []) {
     rows.push({ name, countryName });
   }
 
-  return rows;
+  return extendBilingualCityRows(rows);
 }
