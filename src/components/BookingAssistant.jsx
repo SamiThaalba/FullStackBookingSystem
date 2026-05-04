@@ -131,11 +131,8 @@ export default function BookingAssistant() {
       guests,
     });
     console.info("[BookingUi] AI updated dates/city", { city, checkIn, checkOut, guests });
-    navigate(`/hotels?${query.toString()}`);
-
-    navigate(
-      `/hotels/${hotelId}?from=${encodeURIComponent(checkIn || "")}&to=${encodeURIComponent(checkOut || "")}&guests=${guests}`,
-    );
+    // Go directly to the selected hotel's details for the booking flow.
+    navigate(`/hotels/${hotelId}?${query.toString()}`);
 
     const [hotel, rooms] = await Promise.all([
       bookingApi.getHotel(hotelId),
