@@ -27,7 +27,8 @@ export default function SearchPanel({
     city: initialValues.city ?? bookingUi.city ?? "",
     from: initialValues.from || bookingUi.checkInDate || todayIso(),
     to: initialValues.to || bookingUi.checkOutDate || tomorrowIso(),
-    adults: Number(initialValues.adults || bookingUi.guests || 2),
+    // bookingUi.guests is total guests; do not map it back into adults.
+    adults: Number(initialValues.adults ?? 2),
     children: Number(initialValues.children || 0),
     rooms: Number(initialValues.rooms || 1),
     work: Boolean(initialValues.work || false),
@@ -64,7 +65,6 @@ export default function SearchPanel({
       city: bookingUi.city || current.city,
       from: bookingUi.checkInDate || current.from,
       to: bookingUi.checkOutDate || current.to,
-      adults: bookingUi.guests || current.adults,
     }));
     console.info("[BookingUi] SearchPanel received shared state", bookingUi);
   }, [bookingUi.city, bookingUi.checkInDate, bookingUi.checkOutDate, bookingUi.guests]);
@@ -90,6 +90,8 @@ export default function SearchPanel({
 
   function submit(event) {
     event.preventDefault();
+    setPickerOpen(false);
+    setCityMenuOpen(false);
     const query = new URLSearchParams(searchParams);
     const cityCanonical = resolveCityBilingual(form.city);
     query.set("city", cityCanonical);

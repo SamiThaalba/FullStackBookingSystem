@@ -11,6 +11,17 @@ import { safeImageExtension, validateImageFile } from "../lib/imageUpload";
 const emptyHotel = { name:"",description:"",address:"",cityId:"",phone:"",email:"" };
 const HOTEL_TEXT_FIELDS_NO_IMAGE = ["name", "description", "address", "phone", "email"];
 const emptyRoom  = { hotelId:"",name:"",description:"",capacity:2,inventoryCount:10,basePrice:95,amenities:"WiFi, Parking, Restaurant" };
+const ROOM_PRESETS = {
+    standard: () => ({ ...emptyRoom }),
+    family: () => ({
+        ...emptyRoom,
+        name: "Family Room",
+        description: "Great for families — more space, extra beds, kid-friendly setup.",
+        capacity: 4,
+        amenities: "WiFi, Parking, Breakfast, Crib (on request)",
+        basePrice: 140,
+    }),
+};
 const STATUS_STYLE = {
     CONFIRMED:{ background:"#d1fae5",color:"#065f46" },
     PENDING:  { background:"#fef3c7",color:"#92400e" },
@@ -331,6 +342,22 @@ export default function Dashboard() {
                     {showRoomForm&&(
                         <div className="panel" style={{marginBottom:24}}>
                             <h3 style={{marginTop:0,color:"var(--purple-dark)"}}>Add room type</h3>
+                            <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}}>
+                                <button
+                                    type="button"
+                                    className="btn btn-outline btn-small"
+                                    onClick={()=>setRoomForm((current)=>({ ...ROOM_PRESETS.standard(), hotelId: current.hotelId }))}
+                                >
+                                    Standard preset
+                                </button>
+                                <button
+                                    type="button"
+                                    className="btn btn-outline btn-small"
+                                    onClick={()=>setRoomForm((current)=>({ ...ROOM_PRESETS.family(), hotelId: current.hotelId }))}
+                                >
+                                    Family preset
+                                </button>
+                            </div>
                             <form className="modal-grid" style={{gap:14}} onSubmit={e=>{e.preventDefault();createRoom.mutate(roomForm);}}>
                                 <label style={{gridColumn:"1/-1"}}>
                                     Hotel
