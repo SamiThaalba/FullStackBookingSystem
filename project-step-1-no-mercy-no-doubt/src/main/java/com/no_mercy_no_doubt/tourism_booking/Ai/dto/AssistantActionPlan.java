@@ -13,4 +13,6 @@ public class AssistantActionPlan {
     private Integer guests;
     private Long hotelId;
     private String hotelName;
+    private Long roomTypeId;
+    private String roomTypeName;
 }

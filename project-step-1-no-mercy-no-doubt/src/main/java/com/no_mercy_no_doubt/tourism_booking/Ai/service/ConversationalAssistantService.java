@@ -5,18 +5,27 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.no_mercy_no_doubt.tourism_booking.Ai.dto.*;
 import com.no_mercy_no_doubt.tourism_booking.Recommendation.dto.HotelRecommendationResponse;
 import com.no_mercy_no_doubt.tourism_booking.Recommendation.service.RecommendationService;
+import com.no_mercy_no_doubt.tourism_booking.catalog.Hotel.Hotel;
+import com.no_mercy_no_doubt.tourism_booking.catalog.Hotel.HotelRepository;
+import com.no_mercy_no_doubt.tourism_booking.catalog.RoomType.RoomType;
+import com.no_mercy_no_doubt.tourism_booking.catalog.RoomType.RoomTypeRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 
 import java.time.DayOfWeek;
 import java.time.LocalDate;
+import java.time.MonthDay;
 import java.time.format.DateTimeParseException;
 import java.time.temporal.TemporalAdjusters;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -26,13 +35,21 @@ import java.util.regex.Pattern;
 public class ConversationalAssistantService {
     private static final Pattern GUEST_COUNT_PATTERN =
             Pattern.compile("\\b(\\d{1,2})\\s*(guest|guests|people|person)?\\b", Pattern.CASE_INSENSITIVE);
+    private static final Pattern ORDINAL_PICK_PATTERN =
+            Pattern.compile("\\b(\\d{1,2})(?:st|nd|rd|th)?\\b", Pattern.CASE_INSENSITIVE);
 
     private final GroqClientService groqClientService;
     private final RecommendationService recommendationService;
+    private final HotelRepository hotelRepository;
+    private final RoomTypeRepository roomTypeRepository;
     private final ObjectMapper objectMapper;
 
     public AssistantChatResponse chat(AssistantChatRequest request) {
         AssistantContext context = request.getContext() == null ? new AssistantContext() : request.getContext();
+        String previousCity = context.getCity();
+        String previousCheckIn = context.getCheckIn();
+        String previousCheckOut = context.getCheckOut();
+        Integer previousGuests = context.getGuests();
 
         JsonNode llmJson = parseAssistantJson(callAssistantLlm(request, context));
         String intent = textNode(llmJson, "intent", "other");
@@ -41,11 +58,22 @@ public class ConversationalAssistantService {
         }
 
         JsonNode slots = llmJson.path("slots");
+        String requestedHotelName = textNode(slots, "selectedHotelName", null);
+        if (isBlank(requestedHotelName)) {
+            requestedHotelName = firstNonBlank(extractRequestedHotelName(request.getMessage()), inferHotelNameFromMessage(request.getMessage()));
+        }
+        String requestedRoomTypeName = textNode(slots, "selectedRoomTypeName", null);
         context.setCity(firstNonBlank(textNode(slots, "city", null), context.getCity()));
-        context.setCheckIn(firstNonBlank(textNode(slots, "checkIn", null), context.getCheckIn()));
-        context.setCheckOut(firstNonBlank(textNode(slots, "checkOut", null), context.getCheckOut()));
+        context.setCheckIn(firstNonBlank(normalizeDateSlot(textNode(slots, "checkIn", null)), context.getCheckIn()));
+        context.setCheckOut(firstNonBlank(normalizeDateSlot(textNode(slots, "checkOut", null)), context.getCheckOut()));
         context.setGuests(firstNonNull(intNode(slots, "guests"), context.getGuests()));
-        context.setSelectedHotelName(firstNonBlank(textNode(slots, "selectedHotelName", null), context.getSelectedHotelName()));
+        context.setSelectedRoomTypeName(firstNonBlank(requestedRoomTypeName, context.getSelectedRoomTypeName()));
+        if (primaryBookingFieldsChanged(previousCity, previousCheckIn, previousCheckOut, previousGuests, context)) {
+            context.setSelectedHotelId(null);
+            context.setSelectedHotelName(null);
+            context.setSelectedRoomTypeId(null);
+            context.setSelectedRoomTypeName(null);
+        }
         applyNaturalDateFallback(request.getMessage(), context);
         boolean hasGuestToken = applyHeuristicGuestFallback(request.getMessage(), context);
 
@@ -61,12 +89,15 @@ public class ConversationalAssistantService {
             intent = "booking";
         }
 
-        String mode = "booking".equals(intent) ? "booking" : ("search".equals(intent) || "filter".equals(intent) ? "search" : context.getMode());
+        String mode = context.getMode();
+        if ("booking".equals(intent)) {
+            mode = "booking";
+        } else if ("search".equals(intent) || "filter".equals(intent)) {
+            mode = "searching";
+        }
         context.setMode(mode);
         log.info("AI parsed slots -> city={}, checkIn={}, checkOut={}, guests={}, intent={}",
                 context.getCity(), context.getCheckIn(), context.getCheckOut(), context.getGuests(), intent);
-
-        List<String> missing = missingFieldsForIntent(intent, context);
 
         List<HotelRecommendationResponse> recommendations = List.of();
         if (context.getCity() != null && !context.getCity().isBlank()) {
@@ -83,12 +114,47 @@ public class ConversationalAssistantService {
                 recommendations = List.of();
             }
         }
-
-        if (context.getSelectedHotelId() == null && !recommendations.isEmpty()) {
-            context.setSelectedHotelId(recommendations.get(0).getHotelId());
-            context.setSelectedHotelName(recommendations.get(0).getHotelName());
+        if ((recommendations == null || recommendations.isEmpty()) && !isBlank(requestedHotelName)) {
+            recommendations = findHotelsByName(requestedHotelName);
         }
 
+        HotelSelectionResult selectionResult = resolveHotelSelection(
+                request.getMessage(),
+                requestedHotelName,
+                recommendations,
+                context
+        );
+        if (selectionResult.selected() != null) {
+            context.setSelectedHotelId(selectionResult.selected().getHotelId());
+            context.setSelectedHotelName(selectionResult.selected().getHotelName());
+            context.setSelectedRoomTypeId(null);
+            context.setSelectedRoomTypeName(null);
+            context.setMode("selecting_room");
+        }
+
+        List<RoomType> roomTypes = loadRoomTypes(context.getSelectedHotelId());
+        RoomSelectionResult roomSelectionResult = resolveRoomSelection(
+                request.getMessage(),
+                requestedRoomTypeName,
+                roomTypes,
+                context
+        );
+        if (roomSelectionResult.selected() != null) {
+            context.setSelectedRoomTypeId(roomSelectionResult.selected().getId());
+            context.setSelectedRoomTypeName(roomSelectionResult.selected().getName());
+            context.setMode("booking");
+        } else if (context.getSelectedHotelId() != null && context.getSelectedRoomTypeId() == null && !roomTypes.isEmpty()) {
+            context.setMode("selecting_room");
+        }
+
+        List<String> missing = missingFieldsForIntent(intent, context, recommendations);
+        if (missing.contains("hotelSelection")) {
+            context.setMode("selecting_hotel");
+        } else if (missing.contains("roomSelection")) {
+            context.setMode("selecting_room");
+        } else if ("booking".equals(intent) && missing.isEmpty() && context.getSelectedRoomTypeId() != null) {
+            context.setMode("confirming");
+        }
         AssistantActionPlan action = buildAction(intent, context, missing, recommendations);
         String reply = textNode(llmJson, "reply", "");
         if ("booking".equals(intent) && !missing.isEmpty()) {
@@ -100,6 +166,37 @@ public class ConversationalAssistantService {
         }
         if ("booking".equals(intent) && recommendations.isEmpty() && context.getCity() != null) {
             reply = "I could not find available matches in " + context.getCity() + ". Try another city or different dates.";
+        }
+        if ("booking".equals(intent) && !recommendations.isEmpty() && context.getSelectedHotelId() == null) {
+            if (selectionResult.noNameMatch()) {
+                List<HotelRecommendationResponse> similarOptions =
+                        selectionResult.candidates().isEmpty() ? recommendations : selectionResult.candidates();
+                reply = "I couldn't find a hotel with that name. Here are some similar options:\n"
+                        + renderHotelOptions(similarOptions)
+                        + "\nWhich hotel would you like to book?";
+            } else if (selectionResult.multipleMatches()) {
+                reply = "I found multiple hotels matching that name:\n"
+                        + renderHotelOptions(selectionResult.candidates())
+                        + "\nWhich hotel would you like to book?";
+            } else if (missing.contains("hotelSelection")) {
+                reply = "Here are available hotels:\n"
+                        + renderHotelOptions(recommendations)
+                        + "\nWhich hotel would you like to book?";
+            }
+        }
+        if ("booking".equals(intent) && context.getSelectedHotelId() != null && context.getSelectedRoomTypeId() == null) {
+            if (roomSelectionResult.noNameMatch()) {
+                List<RoomType> similarRooms = roomSelectionResult.candidates().isEmpty() ? roomTypes : roomSelectionResult.candidates();
+                reply = "I couldn't find that room type. Here are similar options:\n"
+                        + renderRoomTypeOptions(similarRooms)
+                        + "\nWhich room type would you like?";
+            } else if (roomSelectionResult.multipleMatches()) {
+                reply = "I found multiple matching room types:\n"
+                        + renderRoomTypeOptions(roomSelectionResult.candidates())
+                        + "\nWhich room type would you like?";
+            } else {
+                reply = "Which room type would you like?\n" + renderRoomTypeOptions(roomTypes);
+            }
         }
 
         return AssistantChatResponse.builder()
@@ -130,7 +227,8 @@ public class ConversationalAssistantService {
                     "checkIn":"YYYY-MM-DD|null",
                     "checkOut":"YYYY-MM-DD|null",
                     "guests":number|null,
-                    "selectedHotelName":"string|null"
+                    "selectedHotelName":"string|null",
+                    "selectedRoomTypeName":"string|null"
                   }
                 }
                 """;
@@ -142,6 +240,7 @@ public class ConversationalAssistantService {
                 .append("checkOut=").append(context.getCheckOut()).append("\n")
                 .append("guests=").append(context.getGuests()).append("\n")
                 .append("selectedHotelName=").append(context.getSelectedHotelName()).append("\n")
+                .append("selectedRoomTypeName=").append(context.getSelectedRoomTypeName()).append("\n")
                 .append("mode=").append(context.getMode()).append("\n\n");
         userPrompt.append("Recent conversation turns:\n");
         for (AssistantTurn turn : trimHistory(request.getHistory(), 8)) {
@@ -175,6 +274,22 @@ public class ConversationalAssistantService {
             if (!missing.isEmpty() && missing.contains("city")) {
                 return AssistantActionPlan.builder().type("ASK_MISSING").build();
             }
+            if (missing.contains("hotelSelection")) {
+                return AssistantActionPlan.builder()
+                        .type("ASK_HOTEL_SELECTION")
+                        .city(context.getCity())
+                        .checkIn(context.getCheckIn())
+                        .checkOut(context.getCheckOut())
+                        .guests(context.getGuests())
+                        .build();
+            }
+            if (missing.contains("roomSelection")) {
+                return AssistantActionPlan.builder()
+                        .type("ASK_ROOM_SELECTION")
+                        .hotelId(context.getSelectedHotelId())
+                        .hotelName(context.getSelectedHotelName())
+                        .build();
+            }
             if (!missing.isEmpty()) {
                 return AssistantActionPlan.builder()
                         .type("NAVIGATE_DISCOVER")
@@ -186,10 +301,6 @@ public class ConversationalAssistantService {
             }
             Long hotelId = context.getSelectedHotelId();
             String hotelName = context.getSelectedHotelName();
-            if ((hotelId == null || hotelName == null) && !recommendations.isEmpty()) {
-                hotelId = recommendations.get(0).getHotelId();
-                hotelName = recommendations.get(0).getHotelName();
-            }
             return AssistantActionPlan.builder()
                     .type("PREPARE_BOOKING")
                     .city(context.getCity())
@@ -198,18 +309,44 @@ public class ConversationalAssistantService {
                     .guests(context.getGuests())
                     .hotelId(hotelId)
                     .hotelName(hotelName)
+                    .roomTypeId(context.getSelectedRoomTypeId())
+                    .roomTypeName(context.getSelectedRoomTypeName())
                     .build();
         }
         return AssistantActionPlan.builder().type("NONE").build();
     }
 
-    private List<String> missingFieldsForIntent(String intent, AssistantContext context) {
+    private List<String> missingFieldsForIntent(String intent, AssistantContext context,
+                                                List<HotelRecommendationResponse> recommendations) {
         List<String> missing = new ArrayList<>();
         if ("booking".equals(intent)) {
-            if (isBlank(context.getCity())) missing.add("city");
-            if (isBlank(context.getCheckIn())) missing.add("checkIn");
-            if (isBlank(context.getCheckOut())) missing.add("checkOut");
-            if (context.getGuests() == null || context.getGuests() < 1) missing.add("guests");
+            if (isBlank(context.getCity()) && context.getSelectedHotelId() == null) missing.add("city");
+            boolean datesOrGuestsMissing = isBlank(context.getCheckIn())
+                    || isBlank(context.getCheckOut())
+                    || context.getGuests() == null
+                    || context.getGuests() < 1;
+            boolean explicitHotelRequest = !isBlank(context.getSelectedHotelName()) && context.getSelectedHotelId() == null;
+
+            // Normal flow: city -> dates/guests -> hotel -> room.
+            // Direct hotel flow: if user explicitly gave a hotel name, allow hotel selection earlier.
+            if (!explicitHotelRequest) {
+                if (isBlank(context.getCheckIn())) missing.add("checkIn");
+                if (isBlank(context.getCheckOut())) missing.add("checkOut");
+                if (context.getGuests() == null || context.getGuests() < 1) missing.add("guests");
+            }
+
+            if (missing.isEmpty() && context.getSelectedHotelId() == null && !recommendations.isEmpty()) {
+                missing.add("hotelSelection");
+            }
+            if (missing.isEmpty() && context.getSelectedHotelId() != null && context.getSelectedRoomTypeId() == null) {
+                missing.add("roomSelection");
+            }
+
+            if (explicitHotelRequest && datesOrGuestsMissing) {
+                if (isBlank(context.getCheckIn())) missing.add("checkIn");
+                if (isBlank(context.getCheckOut())) missing.add("checkOut");
+                if (context.getGuests() == null || context.getGuests() < 1) missing.add("guests");
+            }
         } else if ("search".equals(intent) || "filter".equals(intent)) {
             if (isBlank(context.getCity())) missing.add("city");
         }
@@ -242,6 +379,8 @@ public class ConversationalAssistantService {
             case "checkIn" -> "Great, I can help with " + context.getCity() + ". What is your check-in date?";
             case "checkOut" -> "Got it. What is your check-out date?";
             case "guests" -> "Perfect. How many guests will stay?";
+            case "hotelSelection" -> "Which hotel would you like to book?";
+            case "roomSelection" -> "Which room type would you like?";
             case "city" -> "Sure, which city would you like to stay in?";
             default -> "Please share the missing booking details so I can continue.";
         };
@@ -274,6 +413,355 @@ public class ConversationalAssistantService {
 
     private static Integer firstNonNull(Integer first, Integer second) {
         return first != null ? first : second;
+    }
+
+    private boolean primaryBookingFieldsChanged(String previousCity, String previousCheckIn,
+                                                String previousCheckOut, Integer previousGuests,
+                                                AssistantContext currentContext) {
+        return !Objects.equals(normalizeText(previousCity), normalizeText(currentContext.getCity()))
+                || !Objects.equals(normalizeText(previousCheckIn), normalizeText(currentContext.getCheckIn()))
+                || !Objects.equals(normalizeText(previousCheckOut), normalizeText(currentContext.getCheckOut()))
+                || !Objects.equals(previousGuests, currentContext.getGuests());
+    }
+
+    private HotelSelectionResult resolveHotelSelection(String message,
+                                                       String requestedHotelNameFromSlot,
+                                                       List<HotelRecommendationResponse> recommendations,
+                                                       AssistantContext context) {
+        if (recommendations == null || recommendations.isEmpty()) {
+            context.setSelectedHotelId(null);
+            context.setSelectedHotelName(null);
+            return HotelSelectionResult.none(false, false, List.of());
+        }
+
+        if (context.getSelectedHotelId() != null) {
+            boolean stillAvailable = recommendations.stream()
+                    .anyMatch(h -> Objects.equals(h.getHotelId(), context.getSelectedHotelId()));
+            if (!stillAvailable) {
+                context.setSelectedHotelId(null);
+                context.setSelectedHotelName(null);
+            }
+        }
+
+        Integer pickedIndex = parsePickIndex(message);
+        if (pickedIndex != null && pickedIndex >= 0 && pickedIndex < recommendations.size()) {
+            return HotelSelectionResult.selected(recommendations.get(pickedIndex));
+        }
+
+        String requestedHotelName = firstNonBlank(
+                requestedHotelNameFromSlot,
+                firstNonBlank(extractRequestedHotelName(message), inferHotelNameFromMessage(message))
+        );
+        if (isBlank(requestedHotelName)) {
+            return HotelSelectionResult.none(false, false, List.of());
+        }
+
+        String target = normalizeText(requestedHotelName);
+        List<HotelRecommendationResponse> exactMatches = recommendations.stream()
+                .filter(h -> normalizeText(h.getHotelName()).equals(target))
+                .toList();
+        if (exactMatches.size() == 1) {
+            return HotelSelectionResult.selected(exactMatches.get(0));
+        }
+        if (exactMatches.size() > 1) {
+            return HotelSelectionResult.none(false, true, exactMatches);
+        }
+
+        List<HotelRecommendationResponse> fuzzyMatches = recommendations.stream()
+                .filter(h -> {
+                    String candidate = normalizeText(h.getHotelName());
+                    return candidate.contains(target) || target.contains(candidate);
+                })
+                .toList();
+        if (fuzzyMatches.size() == 1) {
+            return HotelSelectionResult.selected(fuzzyMatches.get(0));
+        }
+        if (fuzzyMatches.size() > 1) {
+            return HotelSelectionResult.none(false, true, fuzzyMatches);
+        }
+
+        return HotelSelectionResult.none(true, false, bestSimilarOptions(target, recommendations, 3));
+    }
+
+    private List<HotelRecommendationResponse> bestSimilarOptions(String target,
+                                                                 List<HotelRecommendationResponse> recommendations,
+                                                                 int limit) {
+        return recommendations.stream()
+                .sorted(Comparator.comparingInt(h -> similarityDistance(target, normalizeText(h.getHotelName()))))
+                .limit(limit)
+                .toList();
+    }
+
+    private int similarityDistance(String target, String candidate) {
+        if (candidate.contains(target) || target.contains(candidate)) {
+            return 0;
+        }
+        List<String> targetTokens = Arrays.stream(target.split("\\s+")).filter(s -> !s.isBlank()).toList();
+        List<String> candidateTokens = Arrays.stream(candidate.split("\\s+")).filter(s -> !s.isBlank()).toList();
+        long overlap = targetTokens.stream().filter(candidateTokens::contains).count();
+        return (int) (Math.max(targetTokens.size(), candidateTokens.size()) - overlap);
+    }
+
+    private Integer parsePickIndex(String message) {
+        String normalized = normalizeText(message);
+        if (normalized.isBlank()) {
+            return null;
+        }
+        Map<String, Integer> named = Map.of(
+                "first", 1,
+                "second", 2,
+                "third", 3,
+                "fourth", 4,
+                "fifth", 5
+        );
+        for (Map.Entry<String, Integer> entry : named.entrySet()) {
+            if (normalized.matches(".*\\b" + entry.getKey() + "\\b.*")) {
+                return entry.getValue() - 1;
+            }
+        }
+        Matcher matcher = ORDINAL_PICK_PATTERN.matcher(normalized);
+        if (matcher.find()) {
+            int number = Integer.parseInt(matcher.group(1));
+            if (number > 0) {
+                return number - 1;
+            }
+        }
+        return null;
+    }
+
+    private String extractRequestedHotelName(String message) {
+        if (message == null || message.isBlank()) {
+            return null;
+        }
+        String normalized = message.trim();
+        Pattern pattern = Pattern.compile(
+                "(?i)(?:hotel\\s+(?:called|named)?\\s*|book\\s+)([\\p{L}\\p{N}&'\\-\\s]{2,})"
+        );
+        Matcher matcher = pattern.matcher(normalized);
+        if (matcher.find()) {
+            return matcher.group(1).trim();
+        }
+        return null;
+    }
+
+    private String inferHotelNameFromMessage(String message) {
+        if (message == null || message.isBlank()) {
+            return null;
+        }
+        String normalized = message.trim();
+        if (normalized.split("\\s+").length > 6) {
+            return null;
+        }
+        String lowered = normalizeText(normalized);
+        if (lowered.matches(".*\\b(today|tomorrow|guest|guests|people|person|city|check\\s*in|check\\s*out)\\b.*")) {
+            return null;
+        }
+        if (parsePickIndex(normalized) != null) {
+            return null;
+        }
+        return normalized;
+    }
+
+    private String renderHotelOptions(List<HotelRecommendationResponse> hotels) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < hotels.size(); i++) {
+            HotelRecommendationResponse h = hotels.get(i);
+            sb.append(i + 1).append(") ").append(h.getHotelName());
+            if (h.getStartingPrice() != null) {
+                sb.append(" - from ").append(h.getStartingPrice());
+            }
+            if (h.getScore() != null) {
+                sb.append(" (score ").append(h.getScore()).append(")");
+            }
+            if (i < hotels.size() - 1) {
+                sb.append("\n");
+            }
+        }
+        return sb.toString();
+    }
+
+    private String normalizeText(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value.trim().toLowerCase(Locale.ROOT).replaceAll("\\s+", " ");
+    }
+
+    private record HotelSelectionResult(HotelRecommendationResponse selected,
+                                        boolean noNameMatch,
+                                        boolean multipleMatches,
+                                        List<HotelRecommendationResponse> candidates) {
+        static HotelSelectionResult selected(HotelRecommendationResponse selected) {
+            return new HotelSelectionResult(selected, false, false, List.of());
+        }
+
+        static HotelSelectionResult none(boolean noNameMatch, boolean multipleMatches,
+                                         List<HotelRecommendationResponse> candidates) {
+            return new HotelSelectionResult(null, noNameMatch, multipleMatches, candidates);
+        }
+    }
+
+    private List<RoomType> loadRoomTypes(Long hotelId) {
+        if (hotelId == null) {
+            return List.of();
+        }
+        try {
+            return roomTypeRepository.findByHotelId(hotelId).stream()
+                    .filter(this::isValidRoomType)
+                    .toList();
+        } catch (Exception ex) {
+            return List.of();
+        }
+    }
+
+    private List<HotelRecommendationResponse> findHotelsByName(String hotelName) {
+        if (isBlank(hotelName)) {
+            return List.of();
+        }
+        String pattern = "%" + hotelName.trim() + "%";
+        try {
+            return hotelRepository.findByFilters(null, null, pattern, PageRequest.of(0, 5))
+                    .stream()
+                    .map(this::toRecommendationResponse)
+                    .toList();
+        } catch (Exception ex) {
+            return List.of();
+        }
+    }
+
+    private HotelRecommendationResponse toRecommendationResponse(Hotel hotel) {
+        return HotelRecommendationResponse.builder()
+                .hotelId(hotel.getId())
+                .hotelName(hotel.getName())
+                .city(hotel.getDisplayCity())
+                .country(hotel.getDisplayCountry())
+                .build();
+    }
+
+    private RoomSelectionResult resolveRoomSelection(String message,
+                                                     String requestedRoomTypeFromSlot,
+                                                     List<RoomType> roomTypes,
+                                                     AssistantContext context) {
+        if (context.getSelectedHotelId() == null || roomTypes == null || roomTypes.isEmpty()) {
+            context.setSelectedRoomTypeId(null);
+            context.setSelectedRoomTypeName(null);
+            return RoomSelectionResult.none(false, false, List.of());
+        }
+
+        if (context.getSelectedRoomTypeId() != null) {
+            boolean stillExists = roomTypes.stream().anyMatch(r -> Objects.equals(r.getId(), context.getSelectedRoomTypeId()));
+            if (!stillExists) {
+                context.setSelectedRoomTypeId(null);
+                context.setSelectedRoomTypeName(null);
+            }
+        }
+
+        Integer pickedIndex = parsePickIndex(message);
+        if (!looksLikeGuestsOrDateMessage(message) && pickedIndex != null && pickedIndex >= 0 && pickedIndex < roomTypes.size()) {
+            return RoomSelectionResult.selected(roomTypes.get(pickedIndex));
+        }
+
+        String requestedRoomName = firstNonBlank(requestedRoomTypeFromSlot, inferRoomNameFromMessage(message));
+        if (isBlank(requestedRoomName)) {
+            return RoomSelectionResult.none(false, false, List.of());
+        }
+
+        String target = normalizeText(requestedRoomName);
+        List<RoomType> exact = roomTypes.stream()
+                .filter(r -> normalizeText(r.getName()).equals(target))
+                .toList();
+        if (exact.size() == 1) {
+            return RoomSelectionResult.selected(exact.get(0));
+        }
+        if (exact.size() > 1) {
+            return RoomSelectionResult.none(false, true, exact);
+        }
+
+        List<RoomType> fuzzy = roomTypes.stream()
+                .filter(r -> {
+                    String n = normalizeText(r.getName());
+                    return n.contains(target) || target.contains(n);
+                })
+                .toList();
+        if (fuzzy.size() == 1) {
+            return RoomSelectionResult.selected(fuzzy.get(0));
+        }
+        if (fuzzy.size() > 1) {
+            return RoomSelectionResult.none(false, true, fuzzy);
+        }
+
+        return RoomSelectionResult.none(true, false, bestSimilarRooms(target, roomTypes, 3));
+    }
+
+    private List<RoomType> bestSimilarRooms(String target, List<RoomType> roomTypes, int limit) {
+        return roomTypes.stream()
+                .sorted(Comparator.comparingInt(r -> similarityDistance(target, normalizeText(r.getName()))))
+                .limit(limit)
+                .toList();
+    }
+
+    private String inferRoomNameFromMessage(String message) {
+        if (message == null || message.isBlank()) {
+            return null;
+        }
+        String normalized = message.trim();
+        String lowered = normalizeText(normalized);
+        if (lowered.matches(".*\\b(today|tomorrow|guest|guests|people|person|city|hotel|check\\s*in|check\\s*out)\\b.*")) {
+            return null;
+        }
+        if (parsePickIndex(normalized) != null) {
+            return null;
+        }
+        if (normalized.split("\\s+").length > 5) {
+            return null;
+        }
+        return normalized;
+    }
+
+    private boolean looksLikeGuestsOrDateMessage(String message) {
+        String lowered = normalizeText(message);
+        return lowered.matches(".*\\b(guest|guests|people|person|today|tomorrow|check in|check out|night|nights)\\b.*");
+    }
+
+    private String renderRoomTypeOptions(List<RoomType> roomTypes) {
+        if (roomTypes == null || roomTypes.isEmpty()) {
+            return "No room types are currently available.";
+        }
+        StringBuilder sb = new StringBuilder();
+        List<RoomType> validRooms = roomTypes.stream().filter(this::isValidRoomType).toList();
+        for (int i = 0; i < validRooms.size(); i++) {
+            RoomType room = validRooms.get(i);
+            sb.append(i + 1).append(") ").append(room.getName());
+            if (room.getBasePrice() != null) {
+                sb.append(" - ").append(room.getBasePrice());
+            }
+            sb.append(" (capacity ").append(room.getCapacity()).append(")");
+            if (i < validRooms.size() - 1) {
+                sb.append("\n");
+            }
+        }
+        return sb.toString();
+    }
+
+    private boolean isValidRoomType(RoomType roomType) {
+        if (roomType == null || roomType.getName() == null) {
+            return false;
+        }
+        String name = roomType.getName().trim();
+        return !name.isBlank() && !"room type name is required.".equalsIgnoreCase(name);
+    }
+
+    private record RoomSelectionResult(RoomType selected,
+                                       boolean noNameMatch,
+                                       boolean multipleMatches,
+                                       List<RoomType> candidates) {
+        static RoomSelectionResult selected(RoomType selected) {
+            return new RoomSelectionResult(selected, false, false, List.of());
+        }
+
+        static RoomSelectionResult none(boolean noNameMatch, boolean multipleMatches, List<RoomType> candidates) {
+            return new RoomSelectionResult(null, noNameMatch, multipleMatches, candidates);
+        }
     }
 
     private void applyNaturalDateFallback(String message, AssistantContext context) {
@@ -349,6 +837,52 @@ public class ConversationalAssistantService {
         } catch (DateTimeParseException ex) {
             return null;
         }
+    }
+
+    private String normalizeDateSlot(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        LocalDate parsed = parseFlexibleDate(value);
+        return parsed != null ? parsed.toString() : value.trim();
+    }
+
+    private LocalDate parseFlexibleDate(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        String t = value.trim();
+        try {
+            return LocalDate.parse(t);
+        } catch (DateTimeParseException ignored) {
+            // continue with flexible parsing
+        }
+        try {
+            String[] parts = t.split("/");
+            if (parts.length == 2) {
+                int month = Integer.parseInt(parts[0].trim());
+                int day = Integer.parseInt(parts[1].trim());
+                MonthDay md = MonthDay.of(month, day);
+                LocalDate now = LocalDate.now();
+                LocalDate candidate = md.atYear(now.getYear());
+                if (candidate.isBefore(now)) {
+                    candidate = candidate.plusYears(1);
+                }
+                return candidate;
+            }
+            if (parts.length == 3) {
+                int month = Integer.parseInt(parts[0].trim());
+                int day = Integer.parseInt(parts[1].trim());
+                int year = Integer.parseInt(parts[2].trim());
+                if (year < 100) {
+                    year += 2000;
+                }
+                return LocalDate.of(year, month, day);
+            }
+        } catch (RuntimeException ignored) {
+            // unsupported slash format
+        }
+        return null;
     }
 
     private LocalDate resolveTokenToDate(String token, LocalDate reference) {
