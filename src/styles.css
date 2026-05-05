@@ -2175,6 +2175,33 @@ button.hotel-map-label {
   background: color-mix(in srgb, var(--teal) 8%, var(--surface));
 }
 
+.room-card__media {
+  width: 112px;
+  height: 88px;
+  flex: 0 0 auto;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--teal) 18%, var(--line));
+  background: color-mix(in srgb, var(--surface) 85%, var(--surface-muted));
+  display: grid;
+  place-items: center;
+}
+
+.room-card__media img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.room-card__mediaFallback {
+  font-weight: 900;
+  font-size: 0.82rem;
+  color: color-mix(in srgb, var(--teal) 70%, var(--muted));
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
 .room-price {
   min-width: 150px;
   display: grid;

@@ -235,6 +235,28 @@ export default function Dashboard() {
         }
     }
 
+    async function replaceRoomTypeCoverImage(roomTypeId, file, previousImageUrl, extraPatchFields) {
+        const supabase = getSupabase();
+        const bucket = getAvatarsBucket();
+        if (!supabase) throw new Error("Supabase is not configured. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY.");
+        const invalid = validateImageFile(file);
+        if (invalid) throw new Error(invalid);
+        const ext = safeImageExtension(file);
+        let newUrl = null;
+        try {
+            newUrl = await uploadRoomTypeImage(supabase, bucket, roomTypeId, file, ext);
+            const payload = { ...extraPatchFields, imageUrl: newUrl };
+            await bookingApi.updateRoomType(roomTypeId, payload);
+        } catch (e) {
+            if (newUrl) await removeSupabaseObjectByPublicUrl(supabase, newUrl, bucket);
+            throw e;
+        }
+        if (previousImageUrl && previousImageUrl !== newUrl) {
+            await removeSupabaseObjectByPublicUrl(supabase, previousImageUrl, bucket);
+        }
+        return newUrl;
+    }
+
     async function submitCreateHotel(e) {
         e.preventDefault();
         setBlockingHotelSave(true);
@@ -281,7 +303,64 @@ export default function Dashboard() {
             setBlockingHotelSave(false);
         }
     }
-    function startEditRoom(r,hotelId){ setEditingRoom({...r,hotelId}); setEditRoomForm({hotelId:String(hotelId),name:r.name??"",description:r.description??"",capacity:r.capacity,inventoryCount:r.inventoryCount,basePrice:r.basePrice,amenities:(r.amenities??[]).join(", ")}); }
+
+    async function submitCreateRoomType(e) {
+        e.preventDefault();
+        setBlockingRoomSave(true);
+        const base = normalizeRoom({ ...roomForm, imageUrl: "" });
+        try {
+            const created = await createRoom.mutateAsync(base);
+            if (roomImageFile && created?.id) {
+                await replaceRoomTypeCoverImage(created.id, roomImageFile, null, {});
+            }
+            setRoomForm(emptyRoom);
+            setRoomImageFile(null);
+            setShowRoomForm(false);
+            flash("Room type added.");
+            queryClient.invalidateQueries({ queryKey: ["room-types", Number(base.hotelId)] });
+        } catch (err) {
+            flash(err?.message || "Could not add room type.");
+        } finally {
+            setBlockingRoomSave(false);
+        }
+    }
+
+    async function submitEditRoomType() {
+        if (!editingRoom) return;
+        const id = editingRoom.id;
+        const previousImageUrl = editingRoom.imageUrl ?? null;
+        setBlockingRoomSave(true);
+        try {
+            const basePayload = normalizeRoom(editRoomForm);
+            if (editRoomImageFile) {
+                await replaceRoomTypeCoverImage(id, editRoomImageFile, previousImageUrl, basePayload);
+            } else {
+                await updateRoom.mutateAsync({ id, payload: basePayload });
+            }
+            setEditingRoom(null);
+            setEditRoomImageFile(null);
+            flash("Room type updated.");
+            queryClient.invalidateQueries({ queryKey: ["room-types", expandedHotelId] });
+        } catch (err) {
+            flash(err?.message || "Could not update room type.");
+        } finally {
+            setBlockingRoomSave(false);
+        }
+    }
+    function startEditRoom(r,hotelId){
+        setEditRoomImageFile(null);
+        setEditingRoom({...r,hotelId});
+        setEditRoomForm({
+            hotelId:String(hotelId),
+            name:r.name??"",
+            description:r.description??"",
+            capacity:r.capacity,
+            inventoryCount:r.inventoryCount,
+            basePrice:r.basePrice,
+            amenities:(r.amenities??[]).join(", "),
+            imageUrl: r.imageUrl ?? "",
+        });
+    }
     function handleDeleteHotel(h){ if(!window.confirm(`Delete "${h.name}"?\n\nThis removes all room types and cannot be undone.`)) return; deleteHotel.mutate(h.id); }
     function handleDeleteRoom(r){ if(!window.confirm(`Delete room type "${r.name}"? This cannot be undone.`)) return; deleteRoom.mutate(r.id); }
     function toggleExpand(id){ setExpandedHotelId(p=>p===id?null:id); }
@@ -428,7 +507,7 @@ export default function Dashboard() {
                                     Family preset
                                 </button>
                             </div>
-                            <form className="modal-grid" style={{gap:14}} onSubmit={e=>{e.preventDefault();createRoom.mutate(roomForm);}}>
+                            <form className="modal-grid" style={{gap:14}} onSubmit={submitCreateRoomType}>
                                 <label style={{gridColumn:"1/-1"}}>
                                     Hotel
                                     <select value={roomForm.hotelId} onChange={e=>setRoomForm({...roomForm,hotelId:e.target.value})} required>
@@ -436,6 +515,23 @@ export default function Dashboard() {
                                         {hotels.map(h=><option key={h.id} value={h.id}>{h.name}</option>)}
                                     </select>
                                 </label>
+                                <div className="dashboard-hotel-image-block">
+                                    <span style={{display:"block",fontWeight:800,fontSize:"0.78rem",textTransform:"uppercase",letterSpacing:"0.05em",color:"var(--muted)",marginBottom:8}}>Room type image</span>
+                                    <input ref={createRoomImageInputRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" className="visually-hidden" onChange={(e)=>{ setRoomImageFile(e.target.files?.[0]||null); e.target.value=""; }} disabled={blockingRoomSave||createRoom.isPending} />
+                                    <div className="dashboard-hotel-image-preview-wrap">
+                                        {roomCreatePreviewUrl ? (
+                                            <img className="dashboard-hotel-image-preview" src={roomCreatePreviewUrl} alt="" />
+                                        ) : (
+                                            <div className="dashboard-hotel-image-placeholder">No image yet — optional</div>
+                                        )}
+                                    </div>
+                                    <div className="dashboard-hotel-image-actions">
+                                        <button type="button" className="btn btn-outline btn-small" disabled={blockingRoomSave||createRoom.isPending} onClick={()=>createRoomImageInputRef.current?.click()}>{roomImageFile ? "Change image" : "Choose image"}</button>
+                                        {roomImageFile ? (
+                                            <button type="button" className="btn btn-outline btn-small" disabled={blockingRoomSave||createRoom.isPending} onClick={()=>setRoomImageFile(null)}>Clear</button>
+                                        ) : null}
+                                    </div>
+                                </div>
                                 {Object.keys(emptyRoom).filter(f=>f!=="hotelId").map(field=>(
                                     <label key={field} style={field==="description"||field==="amenities"?{gridColumn:"1/-1"}:{}}>
                                         {labelFor(field)}
@@ -443,8 +539,8 @@ export default function Dashboard() {
                                     </label>
                                 ))}
                                 <div style={{gridColumn:"1/-1",display:"flex",gap:10}}>
-                                    <button className="btn btn-teal" disabled={createRoom.isPending}>{createRoom.isPending?"Adding…":"Add room type"}</button>
-                                    <button type="button" className="btn btn-outline" onClick={()=>setShowRoomForm(false)}>Cancel</button>
+                                    <button className="btn btn-teal" disabled={blockingRoomSave||createRoom.isPending}>{blockingRoomSave||createRoom.isPending?"Adding…":"Add room type"}</button>
+                                    <button type="button" className="btn btn-outline" onClick={()=>{setShowRoomForm(false);setRoomImageFile(null);}}>Cancel</button>
                                 </div>
                             </form>
                         </div>
@@ -660,8 +756,25 @@ export default function Dashboard() {
                             <h2>Edit room type</h2>
                             <button style={{border:"none",background:"none",fontSize:"1.4rem",cursor:"pointer",color:"var(--muted)"}} onClick={()=>setEditingRoom(null)}>✕</button>
                         </div>
+                        <div className="dashboard-hotel-image-block" style={{marginBottom:14}}>
+                            <span style={{display:"block",fontWeight:800,fontSize:"0.78rem",textTransform:"uppercase",letterSpacing:"0.05em",color:"var(--muted)",marginBottom:8}}>Room type image</span>
+                            <input ref={editRoomImageInputRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" className="visually-hidden" onChange={(e)=>{ setEditRoomImageFile(e.target.files?.[0]||null); e.target.value=""; }} disabled={blockingRoomSave||updateRoom.isPending} />
+                            <div className="dashboard-hotel-image-preview-wrap">
+                                {editRoomImagePreviewUrl || editingRoom.imageUrl ? (
+                                    <img className="dashboard-hotel-image-preview" src={editRoomImagePreviewUrl || editingRoom.imageUrl} alt="" />
+                                ) : (
+                                    <div className="dashboard-hotel-image-placeholder">No room image</div>
+                                )}
+                            </div>
+                            <div className="dashboard-hotel-image-actions">
+                                <button type="button" className="btn btn-outline btn-small" disabled={blockingRoomSave||updateRoom.isPending} onClick={()=>editRoomImageInputRef.current?.click()}>Change image</button>
+                                {editRoomImageFile ? (
+                                    <button type="button" className="btn btn-outline btn-small" disabled={blockingRoomSave||updateRoom.isPending} onClick={()=>setEditRoomImageFile(null)}>Revert to current</button>
+                                ) : null}
+                            </div>
+                        </div>
                         <div className="modal-grid" style={{gap:14}}>
-                            {Object.keys(emptyRoom).filter(f=>f!=="hotelId").map(field=>(
+                            {Object.keys(emptyRoom).filter(f=>f!=="hotelId" && f!=="imageUrl").map(field=>(
                                 <label key={field} style={field==="description"||field==="amenities"?{gridColumn:"1/-1"}:{}}>
                                     {labelFor(field)}
                                     <input type={["capacity","inventoryCount","basePrice"].includes(field)?"number":"text"} value={editRoomForm[field]??""} onChange={e=>setEditRoomForm({...editRoomForm,[field]:e.target.value})} min={["capacity","inventoryCount"].includes(field)?1:undefined} step={field==="basePrice"?"0.01":undefined} />
@@ -669,7 +782,7 @@ export default function Dashboard() {
                             ))}
                         </div>
                         <div style={{display:"flex",gap:10,marginTop:20}}>
-                            <button className="btn btn-teal" disabled={updateRoom.isPending} onClick={()=>updateRoom.mutate({id:editingRoom.id,payload:editRoomForm})}>{updateRoom.isPending?"Saving…":"Save changes"}</button>
+                            <button className="btn btn-teal" disabled={blockingRoomSave||updateRoom.isPending} onClick={submitEditRoomType}>{blockingRoomSave||updateRoom.isPending?"Saving…":"Save changes"}</button>
                             <button className="btn btn-outline" onClick={()=>setEditingRoom(null)}>Cancel</button>
                         </div>
                     </div>
@@ -699,7 +812,15 @@ function normalizeHotel(payload){
     };
 }
 function normalizeRoom(payload){
-    return {...payload,hotelId:Number(payload.hotelId),capacity:Number(payload.capacity),inventoryCount:Number(payload.inventoryCount),basePrice:Number(payload.basePrice),amenities:String(payload.amenities??"").split(",").map(s=>s.trim()).filter(Boolean)};
+    return {
+        ...payload,
+        hotelId:Number(payload.hotelId),
+        capacity:Number(payload.capacity),
+        inventoryCount:Number(payload.inventoryCount),
+        basePrice:Number(payload.basePrice),
+        imageUrl: payload.imageUrl ?? "",
+        amenities:String(payload.amenities??"").split(",").map(s=>s.trim()).filter(Boolean),
+    };
 }
 function labelFor(field){
     return field.replace(/([A-Z])/g," $1").replace(/^./,l=>l.toUpperCase());

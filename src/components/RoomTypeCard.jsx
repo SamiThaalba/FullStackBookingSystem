@@ -17,6 +17,13 @@ export default function RoomTypeCard({ roomType, onRemove }) {
 
   return (
     <article className="room-card" style={{ alignItems: "center" }}>
+      <div className="room-card__media" aria-hidden>
+        {roomType.imageUrl ? (
+          <img src={roomType.imageUrl} alt="" loading="lazy" />
+        ) : (
+          <span className="room-card__mediaFallback">Room</span>
+        )}
+      </div>
       <div>
         <h3>{roomType.name}</h3>
         <p className="muted">{roomType.description || "Room type"}</p>

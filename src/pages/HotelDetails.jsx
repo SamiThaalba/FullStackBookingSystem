@@ -270,6 +270,13 @@ export default function HotelDetails() {
                     className={`room-card ${Number(selectedRoom?.id) === Number(room.id) ? "room-card--selected" : ""}`}
                     key={room.id}
                   >
+                    <div className="room-card__media" aria-hidden>
+                      {room.imageUrl ? (
+                        <img src={room.imageUrl} alt="" loading="lazy" />
+                      ) : (
+                        <span className="room-card__mediaFallback">Room</span>
+                      )}
+                    </div>
                     <div>
                       <h3>{room.name}</h3>
                       <p>{room.description || t("hotelDetail.defaultRoomDescription")}</p>
