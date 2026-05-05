@@ -7,6 +7,13 @@ import { formatDate, money } from "../utils/format";
 import { getAvatarsBucket, getSupabase } from "../lib/supabase";
 import { removeSupabaseObjectByPublicUrl, uploadHotelCoverImage } from "../lib/supabaseStorage";
 import { safeImageExtension, validateImageFile } from "../lib/imageUpload";
+import {
+    CashPaymentStrategy,
+    CreditCardPaymentStrategy,
+    PAYMENT_METHODS,
+    PaymentContext,
+    getPaymentStrategy,
+} from "../strategies/paymentStrategies";
 
 const emptyHotel = { name:"",description:"",address:"",cityId:"",phone:"",email:"" };
 const HOTEL_TEXT_FIELDS_NO_IMAGE = ["name", "description", "address", "phone", "email"];
@@ -28,6 +35,10 @@ const STATUS_STYLE = {
     CANCELLED:{ background:"#fee2e2",color:"#991b1b" },
 };
 const TABS = ["Overview","Hotels","Bookings"];
+const PAYMENT_LABELS = {
+    [PAYMENT_METHODS.CARD]: "Credit card",
+    [PAYMENT_METHODS.CASH]: "Cash",
+};
 
 export default function Dashboard() {
     const queryClient = useQueryClient();
@@ -49,6 +60,8 @@ export default function Dashboard() {
     const [editHotelImagePreviewUrl,setEditHotelImagePreviewUrl] = useState(null);
     const [hotelCreatePreviewUrl,setHotelCreatePreviewUrl] = useState(null);
     const [blockingHotelSave,setBlockingHotelSave] = useState(false);
+    const [bookingPaymentMethods, setBookingPaymentMethods] = useState({});
+    const [bookingPaymentFeedback, setBookingPaymentFeedback] = useState({});
     const editHotelImageInputRef = useRef(null);
     const createHotelImageInputRef = useRef(null);
 
@@ -124,6 +137,26 @@ export default function Dashboard() {
     const confirmBooking = useMutation({
         mutationFn:bookingApi.confirmBooking,
         onSuccess:()=>{ flash("Booking confirmed."); queryClient.invalidateQueries({queryKey:["upcoming-bookings"]}); },
+    });
+    const processBookingPayment = useMutation({
+        mutationFn: async ({ bookingId, method }) => {
+            const paymentContext = new PaymentContext(getPaymentStrategy(method));
+            return paymentContext.executePayment({ bookingId, bookingApi });
+        },
+        onSuccess: (result, variables) => {
+            setBookingPaymentFeedback((prev) => ({
+                ...prev,
+                [variables.bookingId]: { type: "success", message: result.message },
+            }));
+            flash(`${PAYMENT_LABELS[variables.method]} payment flow completed.`);
+            queryClient.invalidateQueries({ queryKey: ["upcoming-bookings"] });
+        },
+        onError: (error, variables) => {
+            setBookingPaymentFeedback((prev) => ({
+                ...prev,
+                [variables.bookingId]: { type: "error", message: error?.message || "Could not process payment." },
+            }));
+        },
     });
 
     function startEditHotel(h){
@@ -225,10 +258,20 @@ export default function Dashboard() {
     function handleDeleteHotel(h){ if(!window.confirm(`Delete "${h.name}"?\n\nThis removes all room types and cannot be undone.`)) return; deleteHotel.mutate(h.id); }
     function handleDeleteRoom(r){ if(!window.confirm(`Delete room type "${r.name}"? This cannot be undone.`)) return; deleteRoom.mutate(r.id); }
     function toggleExpand(id){ setExpandedHotelId(p=>p===id?null:id); }
+    function getBookingPaymentMethod(bookingId) {
+        return bookingPaymentMethods[bookingId] ?? PAYMENT_METHODS.CARD;
+    }
+    function setBookingPaymentMethod(bookingId, method) {
+        setBookingPaymentMethods((prev) => ({ ...prev, [bookingId]: method }));
+    }
+    async function handleBookingPayment(bookingId) {
+        const method = getBookingPaymentMethod(bookingId);
+        await processBookingPayment.mutateAsync({ bookingId, method });
+    }
 
     const pendingCount   = upcoming.filter(b=>b.status==="PENDING").length;
     const confirmedCount = upcoming.filter(b=>b.status==="CONFIRMED").length;
-    const anyError = [hotelsQuery,citiesQuery,upcomingQuery,createHotel,updateHotel,deleteHotel,createRoom,updateRoom,deleteRoom,confirmBooking].map(x=>x.error?.message).find(Boolean);
+    const anyError = [hotelsQuery,citiesQuery,upcomingQuery,createHotel,updateHotel,deleteHotel,createRoom,updateRoom,deleteRoom,confirmBooking,processBookingPayment].map(x=>x.error?.message).find(Boolean);
 
     return (
         <section className="container dashboard-page">
@@ -461,16 +504,64 @@ export default function Dashboard() {
                         {upcoming.map(booking=>{
                             const hotelName = hotels.find(h=>h.id===booking.hotelId)?.name??`Hotel #${booking.hotelId}`;
                             const statusStyle = STATUS_STYLE[booking.status]??{};
+                            const selectedPaymentMethod = getBookingPaymentMethod(booking.id);
+                            const bookingFeedback = bookingPaymentFeedback[booking.id];
+                            const isPayingThisBooking = processBookingPayment.isPending && processBookingPayment.variables?.bookingId === booking.id;
                             return (
-                                <div key={booking.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"18px 20px",border:"1px solid var(--line)",borderRadius:16,background:"#fff",gap:16,flexWrap:"wrap"}}>
-                                    <div style={{display:"grid",gap:4}}>
+                                <div key={booking.id} style={{display:"grid",gridTemplateColumns:"minmax(250px,1fr) minmax(280px,1fr)",padding:"18px 20px",border:"1px solid var(--line)",borderRadius:16,background:"#fff",gap:16}}>
+                                    <div style={{display:"grid",gap:6}}>
                                         <div style={{fontWeight:800,color:"var(--purple-dark)"}}>{hotelName}<span className="muted" style={{fontWeight:400,fontSize:"0.85rem",marginLeft:8}}>Booking #{booking.id}</span></div>
                                         <div className="muted" style={{fontSize:"0.85rem"}}>📅 {formatDate(booking.startDate)} → {formatDate(booking.endDate)}</div>
                                         <div className="muted" style={{fontSize:"0.82rem"}}>Room #{booking.roomTypeId} · Guest #{booking.guestId}</div>
+                                        <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",marginTop:2}}>
+                                            <span style={{fontWeight:800,color:"var(--purple)",fontSize:"1.05rem"}}>{money(booking.totalPrice)}</span>
+                                            <span style={{...statusStyle,borderRadius:999,padding:"5px 12px",fontWeight:800,fontSize:"0.8rem"}}>{booking.status}</span>
+                                        </div>
                                     </div>
-                                    <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
-                                        <span style={{fontWeight:800,color:"var(--purple)",fontSize:"1.05rem"}}>{money(booking.totalPrice)}</span>
-                                        <span style={{...statusStyle,borderRadius:999,padding:"5px 12px",fontWeight:800,fontSize:"0.8rem"}}>{booking.status}</span>
+                                    <div style={{display:"grid",gap:10,padding:"12px",border:"1px solid #ece7f8",borderRadius:12,background:"#faf8ff"}}>
+                                        <div style={{display:"grid",gap:8}}>
+                                            <div style={{fontSize:"0.75rem",fontWeight:800,textTransform:"uppercase",letterSpacing:"0.06em",color:"var(--muted)"}}>Payment method</div>
+                                            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                                                <button
+                                                    type="button"
+                                                    className="btn btn-small btn-outline"
+                                                    onClick={()=>setBookingPaymentMethod(booking.id, PAYMENT_METHODS.CARD)}
+                                                    style={selectedPaymentMethod===PAYMENT_METHODS.CARD?{background:"#ede9fe",borderColor:"#c4b5fd",color:"#4c1d95"}:{}}
+                                                    disabled={isPayingThisBooking}
+                                                >
+                                                    {PAYMENT_LABELS[PAYMENT_METHODS.CARD]}
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    className="btn btn-small btn-outline"
+                                                    onClick={()=>setBookingPaymentMethod(booking.id, PAYMENT_METHODS.CASH)}
+                                                    style={selectedPaymentMethod===PAYMENT_METHODS.CASH?{background:"#dcfce7",borderColor:"#86efac",color:"#166534"}:{}}
+                                                    disabled={isPayingThisBooking}
+                                                >
+                                                    {PAYMENT_LABELS[PAYMENT_METHODS.CASH]}
+                                                </button>
+                                            </div>
+                                            <p className="muted" style={{margin:0,fontSize:"0.8rem"}}>
+                                                {selectedPaymentMethod===PAYMENT_METHODS.CARD
+                                                    ? "Card strategy: create and immediately process online payment."
+                                                    : "Cash strategy: register payment request and collect cash at check-in."}
+                                            </p>
+                                        </div>
+                                        <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                                            <button
+                                                type="button"
+                                                className="btn btn-small btn-teal"
+                                                disabled={isPayingThisBooking}
+                                                onClick={()=>handleBookingPayment(booking.id)}
+                                            >
+                                                {isPayingThisBooking ? "Processing…" : "Process payment"}
+                                            </button>
+                                            {bookingFeedback?.message ? (
+                                                <span style={{fontSize:"0.8rem",fontWeight:700,color:bookingFeedback.type==="error"?"#9b1c1c":"#065f46"}}>
+                                                    {bookingFeedback.message}
+                                                </span>
+                                            ) : null}
+                                        </div>
                                         {booking.status==="PENDING"&&auth.hasPermission("booking:update")&&(
                                             <button className="btn btn-small btn-teal" disabled={confirmBooking.isPending} onClick={()=>confirmBooking.mutate(booking.id)}>{confirmBooking.isPending?"…":"Confirm"}</button>
                                         )}
