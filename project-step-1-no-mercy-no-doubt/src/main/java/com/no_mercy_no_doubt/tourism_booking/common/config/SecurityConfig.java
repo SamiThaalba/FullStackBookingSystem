@@ -77,7 +77,7 @@ public class SecurityConfig {
                                     response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
                                     response.setContentType(MediaType.APPLICATION_JSON_VALUE);
                                     response.setCharacterEncoding("UTF-8");
-                                    response.getWriter().write("{\"status\":401,\"error\":\"Unauthorized\",\"message\":\"Either email or password is incorrect.\"}");
+                                    response.getWriter().write("{\"status\":401,\"error\":\"Unauthorized\",\"message\":\"Either username or password is incorrect.\"}");
                                 },
                                 request -> request.getRequestURI().startsWith("/api")
                         )

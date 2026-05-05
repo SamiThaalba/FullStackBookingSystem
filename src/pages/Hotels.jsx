@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useSearchParams } from "react-router-dom";
 import { bookingApi } from "../api/bookingApi";
@@ -24,6 +24,7 @@ export default function Hotels() {
   const name = searchParams.get("name") || "";
   const adults = searchParams.get("adults") || "";
   const children = searchParams.get("children") || "";
+  const [nameInput, setNameInput] = useState(name);
 
   const filters = useMemo(
     () => ({
@@ -77,6 +78,10 @@ export default function Hotels() {
     });
   }, [city, from, to, guests, updateBookingUi]);
 
+  useEffect(() => {
+    setNameInput(name);
+  }, [name]);
+
   const searchCityRows = useMemo(
     () => buildSearchCityRows(citiesQuery.data ?? [], hotels),
     [citiesQuery.data, hotels],
@@ -106,6 +111,26 @@ export default function Hotels() {
     setSearchParams(next);
   }
 
+  function setNameFilter(value) {
+    const next = new URLSearchParams(searchParams);
+    const trimmed = value.trim();
+    if (trimmed) next.set("name", trimmed);
+    else next.delete("name");
+    next.set("page", "0");
+    setSearchParams(next);
+  }
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      const trimmed = nameInput.trim();
+      if (trimmed === name) return;
+      if (!trimmed && !name) return;
+      setNameFilter(trimmed);
+    }, 100);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [nameInput]); // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
     <section className="container results-page">
       <SearchPanel
@@ -126,6 +151,14 @@ export default function Hotels() {
         <button className="filter-button" type="button">
           {t("hotels.filterBy")}
         </button>
+        <input
+          className="filter-button"
+          type="search"
+          value={nameInput}
+          onChange={(event) => setNameInput(event.target.value)}
+          placeholder={t("hotels.nameSearchPlaceholder", { defaultValue: "Search hotel name" })}
+          aria-label={t("hotels.nameSearchAria", { defaultValue: "Search by hotel name" })}
+        />
         <select
           className="filter-button"
           aria-label={t("hotels.countryFilter")}

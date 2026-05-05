@@ -39,7 +39,6 @@ export default function Register() {
       <div className="auth-card">
         <p className="eyebrow">{t("register.eyebrow")}</p>
         <h1>{t("register.title")}</h1>
-        <p className="muted">{t("register.hint")}</p>
         <Alert type="error">{error}</Alert>
         <form className="stack-form" onSubmit={submit}>
           <label>

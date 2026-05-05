@@ -9,6 +9,7 @@ import { money } from "../utils/format";
 import { addDaysIso, isIsoOnOrBefore, tomorrowIso } from "../utils/dates";
 
 const ASSISTANT_MEMORY_KEY = "quickreserve-ai-memory-v2";
+const ASSISTANT_AUTO_OPEN_KEY = "quickreserve-ai-auto-open-v1";
 
 function loadMemory() {
   try {
@@ -76,12 +77,92 @@ function isHotelListPrompt(text) {
   );
 }
 
+function shouldShowGuide(text) {
+  const value = String(text || "").toLowerCase();
+  if (!value) return false;
+  return (
+    value.includes("guide me") ||
+    value.includes("guidance") ||
+    value.includes("steps") ||
+    value.includes("step by step")
+  );
+}
+
+// Converts user-typed "D-M" / "D/M" / "D.M" patterns → "YYYY-MM-DD" using current year.
+function normalizeDateInput(text) {
+  const year = new Date().getFullYear();
+  return String(text || "").replace(
+    /\b(\d{1,2})[\/\-\.](\d{1,2})\b(?![\-\/\.]\d{2,4})/g,
+    (raw, p1, p2) => {
+      const day = Number(p1);
+      const month = Number(p2);
+      if (day >= 1 && day <= 31 && month >= 1 && month <= 12) {
+        return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+      }
+      return raw;
+    },
+  );
+}
+
+function extractIsoDates(text) {
+  const t = String(text || "");
+  const matches = t.match(/\b\d{4}-\d{2}-\d{2}\b/g) || [];
+  return matches.slice(0, 3);
+}
+
+function extractGuestsCount(text) {
+  const t = String(text || "").toLowerCase();
+  const match = t.match(/\b(\d{1,2})\b/);
+  if (!match) return null;
+  const n = Number(match[1]);
+  if (!Number.isFinite(n) || n <= 0 || n > 20) return null;
+  return n;
+}
+
+function getGuideQuestion(context, confirmDraft) {
+  if (!context?.city && !context?.anyCity && !Number(context?.selectedHotelId || 0)) {
+    return "Great — step 1: which city do you want to stay in? (Or say: any city)";
+  }
+  if (!context?.checkIn || !context?.checkOut) {
+    return "Step 2: what are your check-in and check-out dates? (YYYY-MM-DD)";
+  }
+  if (!Number(context?.guests || 0)) {
+    return "Step 3: how many guests will stay?";
+  }
+  if (confirmDraft) {
+    return "Everything is ready. Please choose a payment method, then confirm booking.";
+  }
+  return "Great. I’ll open results — choose a hotel from the list.";
+}
+
+function getFlowStep(context, confirmDraft) {
+  const hasHotel = Number(context?.selectedHotelId || 0) > 0;
+  const hasCity = Boolean(context?.city || context?.anyCity);
+  const hasDates = Boolean(context?.checkIn && context?.checkOut);
+  const hasGuests = Number(context?.guests || 0) > 0;
+  const hasRoom = Number(context?.selectedRoomTypeId || 0) > 0;
+
+  if (!hasCity && !hasHotel) return { number: 1, label: "Choose destination" };
+  if (!hasDates) return { number: 2, label: "Choose dates" };
+  if (!hasGuests) return { number: 3, label: "Choose guests" };
+  if (!hasHotel) return { number: 4, label: "Choose hotel" };
+  if (!hasRoom) return { number: 5, label: "Choose room type" };
+  return confirmDraft ? { number: 6, label: "Confirm booking" } : { number: 6, label: "Confirm booking" };
+}
+
 function navigateWithContext({ navigate, updateBookingUi, ctx, fallbackGuests = 1 }) {
   const guests = Number(ctx?.guests || fallbackGuests || 1);
   const checkIn = ctx?.checkIn || "";
   const checkOut = ctx?.checkOut || "";
   const hasAnyCity = Boolean(ctx?.anyCity) || !ctx?.city;
   const city = hasAnyCity ? "" : String(ctx?.city || "");
+
+  // Ensure the floating assistant opens on the destination page (Layout hides it on "/").
+  try {
+    sessionStorage.setItem(ASSISTANT_AUTO_OPEN_KEY, "1");
+  } catch {
+    // ignore storage issues
+  }
 
   updateBookingUi({
     city,
@@ -172,6 +253,7 @@ export default function HomeAiAssistant({ cities: _cities } = {}) {
   const [chat, setChat] = useState(() => initialMemory.history);
   const [context, setContext] = useState(() => initialMemory.context);
   const [loading, setLoading] = useState(false);
+  const [guideEnabled, setGuideEnabled] = useState(false);
   const [confirmDraft, setConfirmDraft] = useState(null);
   const scrollerRef = useRef(null);
   const inputRef = useRef(null);
@@ -181,12 +263,15 @@ export default function HomeAiAssistant({ cities: _cities } = {}) {
     ? t("assistant.hintHotels")
     : t("assistant.hintHome");
 
+  const flowStep = getFlowStep(context, confirmDraft);
+
   useEffect(() => {
     const wasAuthenticated = wasAuthenticatedRef.current;
     const isAuthenticated = Boolean(auth.isAuthenticated);
     if (wasAuthenticated && !isAuthenticated) {
       setContext({});
       setChat([]);
+      setGuideEnabled(false);
       setConfirmDraft(null);
       saveMemory({ context: {}, history: [] });
     }
@@ -199,12 +284,22 @@ export default function HomeAiAssistant({ cities: _cities } = {}) {
     });
   }
 
-  function pushTurn(role, content, nextChat = chat) {
+  function pushTurn(role, content, nextChat = chat, contextOverride = context) {
     const updated = [...nextChat, { role, content }];
     setChat(updated);
-    saveMemory({ context, history: updated });
+    saveMemory({ context: contextOverride || {}, history: updated });
     scrollToBottom();
     return updated;
+  }
+
+  function startGuidedFlow() {
+    setGuideEnabled(true);
+    if (loading) return;
+    const question = getGuideQuestion(context, confirmDraft);
+    if (!question) return;
+    const last = chat[chat.length - 1];
+    if (last?.role === "assistant" && String(last?.content || "").trim() === question) return;
+    pushTurn("assistant", question);
   }
 
   async function prepareBookingFromAction(action, recommendations, userText) {
@@ -307,13 +402,99 @@ export default function HomeAiAssistant({ cities: _cities } = {}) {
   async function sendMessage(overrideText) {
     const text = (overrideText ?? message).trim();
     if (!text || loading) return;
-    const userMeansAnyCity = isAnyCityIntent(text);
+    if (shouldShowGuide(text)) {
+      startGuidedFlow();
+      setMessage("");
+      return;
+    }
+
+    const normalizedText = normalizeDateInput(text);
+    const userMeansAnyCity = isAnyCityIntent(normalizedText);
     setMessage("");
     inputRef.current?.focus();
     const withUser = pushTurn("user", text);
     setLoading(true);
 
     try {
+      // ── Guided flow (local step-by-step; no backend chat) ─────────────────────
+      if (guideEnabled) {
+        const hasCity = Boolean(context?.city || context?.anyCity);
+        const hasDates = Boolean(context?.checkIn && context?.checkOut);
+        const hasGuests = Number(context?.guests || 0) > 0;
+
+        // Step 1: city (or any city)
+        if (!hasCity) {
+          const any = isAnyCityIntent(normalizedText);
+          const resolved = any ? "" : resolveCityBilingual(normalizedText);
+          if (!any && !resolved) {
+            pushTurn("assistant", getGuideQuestion(context, confirmDraft), withUser, context);
+            return;
+          }
+
+          const nextContext = { ...context, city: resolved || "", anyCity: any };
+          setContext(nextContext);
+          saveMemory({ context: nextContext, history: withUser });
+          navigateWithContext({ navigate, updateBookingUi, ctx: nextContext, fallbackGuests: 1 });
+
+          pushTurn(
+            "assistant",
+            `Step 1 saved. ${any ? "Any city is fine." : `City: ${resolved}.`} Step 2: what are your check-in and check-out dates? (YYYY-MM-DD)`,
+            withUser,
+            nextContext,
+          );
+          return;
+        }
+
+        // Step 2: dates
+        if (!hasDates) {
+          const dates = extractIsoDates(normalizedText);
+          if (dates.length < 2) {
+            pushTurn(
+              "assistant",
+              "Please provide check-in and check-out dates (YYYY-MM-DD). Example: 2026-05-10 to 2026-05-13",
+              withUser,
+              context,
+            );
+            return;
+          }
+          let [checkIn, checkOut] = dates;
+          if (new Date(checkOut) <= new Date(checkIn)) {
+            const d = new Date(checkIn);
+            d.setDate(d.getDate() + 1);
+            checkOut = d.toISOString().slice(0, 10);
+          }
+
+          const nextContext = { ...context, checkIn, checkOut };
+          setContext(nextContext);
+          saveMemory({ context: nextContext, history: withUser });
+          navigateWithContext({ navigate, updateBookingUi, ctx: nextContext, fallbackGuests: 1 });
+
+          pushTurn("assistant", "Step 2 saved. Step 3: how many guests will stay?", withUser, nextContext);
+          return;
+        }
+
+        // Step 3: guests
+        if (!hasGuests) {
+          const guests = extractGuestsCount(normalizedText);
+          if (!guests) {
+            pushTurn("assistant", "Please tell me the number of guests (e.g. 2).", withUser, context);
+            return;
+          }
+          const nextContext = { ...context, guests };
+          setContext(nextContext);
+          saveMemory({ context: nextContext, history: withUser });
+          navigateWithContext({ navigate, updateBookingUi, ctx: nextContext, fallbackGuests: 1 });
+
+          pushTurn(
+            "assistant",
+            "Perfect — I opened the results page. Choose a hotel from the UI list (or tell me a specific hotel name).",
+            withUser,
+            nextContext,
+          );
+          return;
+        }
+      }
+
       if (userMeansAnyCity && !context?.city && !Number(context?.selectedHotelId || 0)) {
         const anyContext = { ...context, anyCity: true };
         const hasDatesGuests =
@@ -343,7 +524,7 @@ export default function HomeAiAssistant({ cities: _cities } = {}) {
       }
 
       const response = await bookingApi.assistantChat({
-        message: text,
+        message: normalizedText,
         context,
         history: withUser,
       });
@@ -487,6 +668,7 @@ export default function HomeAiAssistant({ cities: _cities } = {}) {
   function resetConversation() {
     setContext({});
     setChat([]);
+    setGuideEnabled(false);
     setConfirmDraft(null);
     saveMemory({ context: {}, history: [] });
     inputRef.current?.focus();
@@ -516,10 +698,10 @@ export default function HomeAiAssistant({ cities: _cities } = {}) {
                   {t("assistant.badgeText")}
                 </span>
               </div>
-              <span className="muted">{bookingContextHint}</span>
             </div>
           </div>
-          {/* New Chat button in header (matches "after" design) */}
+          <div className="home-ai__headActions">
+            {/* New Chat button in header (matches "after" design) */}
           <button
             type="button"
             className="home-ai__newChat"
@@ -532,7 +714,34 @@ export default function HomeAiAssistant({ cities: _cities } = {}) {
             </svg>
             {t("assistant.reset")}
           </button>
+          </div>
         </div>
+
+        <div className="home-ai__subRow">
+          <span className="muted">{bookingContextHint}</span>
+          <button
+            type="button"
+            className="home-ai__newChat"
+            onClick={startGuidedFlow}
+            disabled={loading}
+            aria-label={t("assistant.guideMe")}
+            title={t("assistant.guideMe")}
+          >
+            {t("assistant.guideMe")}
+          </button>
+        </div>
+
+        {guideEnabled ? (
+          <div className="assistant-stepper" aria-label="Booking progress">
+            <div className="assistant-stepper__top">
+              <span>{`Step ${flowStep.number} of 6`}</span>
+              <small>{flowStep.label}</small>
+            </div>
+            <div className="assistant-stepper__bar" role="presentation">
+              <span style={{ width: `${Math.round((flowStep.number / 6) * 100)}%` }} />
+            </div>
+          </div>
+        ) : null}
       </header>
 
       {/* ── Messages ── */}

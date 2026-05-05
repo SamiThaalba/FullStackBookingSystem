@@ -2585,6 +2585,25 @@ button.notif-row--btn:disabled {
   z-index: 90;
 }
 
+.assistant-shell--draggable {
+  right: auto;
+  bottom: auto;
+}
+
+.assistant-shell--dragging {
+  user-select: none;
+}
+
+.assistant-shell--dragging .assistant-toggle,
+.assistant-shell--dragging .assistant-head {
+  cursor: grabbing;
+}
+
+.assistant-toggle[title="Drag to move"],
+.assistant-head[title="Drag to move"] {
+  cursor: grab;
+}
+
 .assistant-shell--embedded {
   position: static;
   right: auto;
@@ -2739,6 +2758,11 @@ button.notif-row--btn:disabled {
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 8px;
   width: 100%;
+  max-height: 220px;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  padding-right: 4px;
 }
 
 .assistant-roomOption {
@@ -2808,6 +2832,53 @@ button.notif-row--btn:disabled {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.home-ai__headActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+}
+
+.home-ai__headActions .home-ai__newChat {
+  justify-content: center;
+}
+
+.home-ai__subRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.home-ai__subRow .muted {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 520px) {
+  .home-ai__headRow {
+    align-items: flex-start;
+  }
+
+  .home-ai__headActions {
+    justify-content: flex-end;
+  }
+
+  .home-ai__subRow {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .home-ai__subRow .muted {
+    white-space: normal;
+  }
 }
 
 .home-ai__brand {
@@ -3228,6 +3299,25 @@ button.notif-row--btn:disabled {
   border-radius: 50%;
   background: var(--teal);
   border: 2px solid var(--surface);
+}
+
+.assistant-toggle__logo {
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  overflow: hidden;
+  flex-shrink: 0;
+  border: 1px solid color-mix(in srgb, var(--teal) 18%, var(--line));
+  background: var(--surface);
+  display: grid;
+  place-items: center;
+}
+
+.assistant-toggle__logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 
 /* Panel header — improved */

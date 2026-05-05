@@ -3,6 +3,7 @@ import { apiRequest } from "./client";
 export const bookingApi = {
     login:(payload)=>apiRequest("/auth/login",{method:"POST",body:JSON.stringify(payload)}),
     register:(payload)=>apiRequest("/auth/register",{method:"POST",body:JSON.stringify(payload)}),
+    refresh:(refreshToken)=>apiRequest("/auth/refresh",{method:"POST",body:JSON.stringify({refreshToken})}),
     logout:(refreshToken)=>apiRequest("/auth/logout",{method:"POST",body:JSON.stringify({refreshToken})}),
     syncUiLanguage:(language)=>apiRequest("/me/ui-language",{method:"PATCH",body:JSON.stringify({language})}),
     patchAvatar:(payload)=>apiRequest("/me/avatar",{method:"PATCH",body:JSON.stringify(payload)}),

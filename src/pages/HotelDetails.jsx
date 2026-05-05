@@ -260,7 +260,7 @@ export default function HotelDetails() {
               <h2 id="room-types">{t("hotelDetail.roomTypesHeading")}</h2>
               {aiFocusRooms ? (
                 <p className="muted" style={{ marginBottom: "10px" }}>
-                  AI assistant opened this section. Choose a room type to continue booking.
+                  QuickReserve AI opened this section. Choose a room type to continue booking.
                 </p>
               ) : null}
               <Alert type="error">{quoteMutation.error?.message || bookingMutation.error?.message}</Alert>

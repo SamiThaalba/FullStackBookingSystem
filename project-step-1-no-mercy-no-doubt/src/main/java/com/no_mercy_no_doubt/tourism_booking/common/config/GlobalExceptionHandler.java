@@ -116,7 +116,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(AuthenticationException.class)
     public ResponseEntity<ErrorResponse> handleAuth(AuthenticationException ex, HttpServletRequest req) {
-        return buildError(HttpStatus.UNAUTHORIZED, "Authentication Failed", "Either email or password is incorrect.", req.getRequestURI(), null);
+        return buildError(HttpStatus.UNAUTHORIZED, "Authentication Failed", "Either username or password is incorrect.", req.getRequestURI(), null);
     }
 
     @ExceptionHandler(AccessDeniedException.class)
