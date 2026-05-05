@@ -26,6 +26,13 @@ public class RoomType {
 
     private String description;
 
+    /**
+     * Optional public URL for a room-type cover image (e.g. Supabase public object URL).
+     * Stored as a plain string so the frontend can render it directly.
+     */
+    @Column(name = "image_url")
+    private String imageUrl;
+
     @Column(nullable = false)
     private int capacity;
 

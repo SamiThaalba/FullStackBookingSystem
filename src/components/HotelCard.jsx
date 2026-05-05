@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
+import { FaHeart, FaRegHeart } from "react-icons/fa";
 import { useAuth } from "../auth/AuthContext";
 import { compactAddress } from "../utils/format";
 import { useHotelWishlistToggle } from "../hooks/useHotelWishlistToggle";
@@ -7,7 +8,7 @@ import { useHotelWishlistToggle } from "../hooks/useHotelWishlistToggle";
 export default function HotelCard({ hotel }) {
   const { t } = useTranslation();
   const auth = useAuth();
-  const canSave = auth.isAuthenticated && auth.hasPermission("wishlist:manage");
+  const canSave = auth.isAuthenticated;
   const { isInWishlist, toggleMutation } = useHotelWishlistToggle(hotel, canSave);
 
   return (
@@ -37,10 +38,12 @@ export default function HotelCard({ hotel }) {
           {canSave ? (
             <button
               type="button"
-              className="btn btn-small btn-outline"
+              className="btn btn-small btn-outline fav-btn"
               onClick={() => toggleMutation.mutate({ add: !isInWishlist })}
+              aria-label={isInWishlist ? t("hotelCard.removeFromFav") : t("hotelCard.addToFav")}
+              aria-pressed={isInWishlist}
             >
-              {isInWishlist ? t("hotelCard.removeFromFav") : t("hotelCard.addToFav")}
+              {isInWishlist ? <FaHeart size={16} /> : <FaRegHeart size={16} />}
             </button>
           ) : null}
         </div>

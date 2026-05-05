@@ -84,6 +84,7 @@ public class CatalogMapper {
         return RoomType.builder()
                 .name(req.getName())
                 .description(req.getDescription())
+                .imageUrl(req.getImageUrl())
                 .capacity(req.getCapacity())
                 .inventoryCount(req.getInventoryCount() != null ? req.getInventoryCount() : 1)
                 .basePrice(req.getBasePrice())
@@ -95,6 +96,7 @@ public class CatalogMapper {
     public void updateRoomType(RoomType entity, RoomTypeRequest req) {
         entity.setName(req.getName());
         entity.setDescription(req.getDescription());
+        entity.setImageUrl(req.getImageUrl());
         entity.setCapacity(req.getCapacity());
         entity.setInventoryCount(req.getInventoryCount() != null ? req.getInventoryCount() : 1);
         entity.setBasePrice(req.getBasePrice());
@@ -106,6 +108,7 @@ public class CatalogMapper {
                 .id(rt.getId())
                 .name(rt.getName())
                 .description(rt.getDescription())
+                .imageUrl(rt.getImageUrl())
                 .capacity(rt.getCapacity())
                 .inventoryCount(rt.getInventoryCount())
                 .basePrice(rt.getBasePrice())

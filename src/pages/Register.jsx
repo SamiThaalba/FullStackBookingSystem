@@ -20,8 +20,7 @@ export default function Register() {
     setLoading(true);
     try {
       await auth.signUp(form);
-      queryClient.invalidateQueries({ queryKey: ["notifications-unread-count"] });
-      queryClient.invalidateQueries({ queryKey: ["notifications"] });
+      queryClient.setQueryData(["notifications"], []);
       navigate("/hotels", { replace: true });
     } catch (err) {
       setError(err.message);

@@ -11,6 +11,7 @@ import { nightsBetween, todayIso, tomorrowIso } from "../utils/dates";
 import { compactAddress, money } from "../utils/format";
 import { hasValidHotelLatLng } from "../utils/geo";
 import { useHotelWishlistToggle } from "../hooks/useHotelWishlistToggle";
+import { FaHeart, FaRegHeart } from "react-icons/fa";
 import RoomWishlistButton from "../components/RoomWishlistButton";
 import {
   PAYMENT_METHODS,
@@ -131,7 +132,7 @@ export default function HotelDetails() {
 
   const hotel = hotelQuery.data;
   const wishlistHotelEnabled =
-    auth.isAuthenticated && auth.hasPermission("wishlist:manage") && Boolean(hotel?.id);
+    auth.isAuthenticated && Boolean(hotel?.id);
   const wishlistHotel =
     hotel ?? { id: undefined, name: "", city: null, imageUrl: null };
   const { isInWishlist, toggleMutation } = useHotelWishlistToggle(
@@ -270,10 +271,12 @@ export default function HotelDetails() {
                 <div className="detail-fav-row">
                   <button
                     type="button"
-                    className="btn btn-outline"
+                    className="btn btn-outline fav-btn"
                     onClick={() => toggleMutation.mutate({ add: !isInWishlist })}
+                    aria-label={isInWishlist ? t("hotelCard.removeFromFav") : t("hotelCard.addToFav")}
+                    aria-pressed={isInWishlist}
                   >
-                    {isInWishlist ? t("hotelCard.removeFromFav") : t("hotelCard.addToFav")}
+                    {isInWishlist ? <FaHeart size={16} /> : <FaRegHeart size={16} />}
                   </button>
                 </div>
               ) : null}
@@ -373,7 +376,7 @@ export default function HotelDetails() {
                           <RoomWishlistButton
                             room={room}
                             hotel={hotel}
-                            enabled={auth.isAuthenticated && auth.hasPermission("wishlist:manage")}
+                            enabled={auth.isAuthenticated}
                           />
                           <button
                             className="btn btn-small btn-outline room-action-btn"
