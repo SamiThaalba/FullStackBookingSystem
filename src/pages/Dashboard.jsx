@@ -5,7 +5,7 @@ import { useAuth } from "../auth/AuthContext";
 import Alert from "../components/Alert";
 import { formatDate, money } from "../utils/format";
 import { getAvatarsBucket, getSupabase } from "../lib/supabase";
-import { removeSupabaseObjectByPublicUrl, uploadHotelCoverImage } from "../lib/supabaseStorage";
+import { removeSupabaseObjectByPublicUrl, uploadHotelCoverImage, uploadRoomTypeImage } from "../lib/supabaseStorage";
 import { safeImageExtension, validateImageFile } from "../lib/imageUpload";
 import {
     CashPaymentStrategy,
@@ -17,7 +17,7 @@ import {
 
 const emptyHotel = { name:"",description:"",address:"",cityId:"",phone:"",email:"" };
 const HOTEL_TEXT_FIELDS_NO_IMAGE = ["name", "description", "address", "phone", "email"];
-const emptyRoom  = { hotelId:"",name:"",description:"",capacity:2,inventoryCount:10,basePrice:95,amenities:"WiFi, Parking, Restaurant" };
+const emptyRoom  = { hotelId:"",name:"",description:"",capacity:2,inventoryCount:10,basePrice:95,amenities:"WiFi, Parking, Restaurant", imageUrl:"" };
 const ROOM_PRESETS = {
     standard: () => ({ ...emptyRoom }),
     family: () => ({
@@ -60,10 +60,17 @@ export default function Dashboard() {
     const [editHotelImagePreviewUrl,setEditHotelImagePreviewUrl] = useState(null);
     const [hotelCreatePreviewUrl,setHotelCreatePreviewUrl] = useState(null);
     const [blockingHotelSave,setBlockingHotelSave] = useState(false);
+    const [roomImageFile,setRoomImageFile] = useState(null);
+    const [editRoomImageFile,setEditRoomImageFile] = useState(null);
+    const [roomCreatePreviewUrl,setRoomCreatePreviewUrl] = useState(null);
+    const [editRoomImagePreviewUrl,setEditRoomImagePreviewUrl] = useState(null);
+    const [blockingRoomSave,setBlockingRoomSave] = useState(false);
     const [bookingPaymentMethods, setBookingPaymentMethods] = useState({});
     const [bookingPaymentFeedback, setBookingPaymentFeedback] = useState({});
     const editHotelImageInputRef = useRef(null);
     const createHotelImageInputRef = useRef(null);
+    const createRoomImageInputRef = useRef(null);
+    const editRoomImageInputRef = useRef(null);
 
     useLayoutEffect(() => {
         if (!editHotelCoverFile) {
@@ -84,6 +91,26 @@ export default function Dashboard() {
         setHotelCreatePreviewUrl(url);
         return () => URL.revokeObjectURL(url);
     }, [hotelCoverFile]);
+
+    useLayoutEffect(() => {
+        if (!roomImageFile) {
+            setRoomCreatePreviewUrl(null);
+            return;
+        }
+        const url = URL.createObjectURL(roomImageFile);
+        setRoomCreatePreviewUrl(url);
+        return () => URL.revokeObjectURL(url);
+    }, [roomImageFile]);
+
+    useLayoutEffect(() => {
+        if (!editRoomImageFile) {
+            setEditRoomImagePreviewUrl(null);
+            return;
+        }
+        const url = URL.createObjectURL(editRoomImageFile);
+        setEditRoomImagePreviewUrl(url);
+        return () => URL.revokeObjectURL(url);
+    }, [editRoomImageFile]);
 
     const hotelsQuery = useQuery({
         queryKey:["my-hotels"],
@@ -124,7 +151,7 @@ export default function Dashboard() {
     });
     const createRoom = useMutation({
         mutationFn:(p)=>bookingApi.createRoomType(normalizeRoom(p)),
-        onSuccess:()=>{ setRoomForm(emptyRoom); setShowRoomForm(false); flash("Room type added."); queryClient.invalidateQueries({queryKey:["room-types",Number(roomForm.hotelId)]}); },
+        onSuccess:()=>{ setRoomForm(emptyRoom); setRoomImageFile(null); setShowRoomForm(false); flash("Room type added."); queryClient.invalidateQueries({queryKey:["room-types",Number(roomForm.hotelId)]}); },
     });
     const updateRoom = useMutation({
         mutationFn:({id,payload})=>bookingApi.updateRoomType(id,normalizeRoom(payload)),

@@ -61,3 +61,9 @@ export async function uploadHotelCoverImage(supabase, bucket, hotelId, file, ext
   const objectPath = `hotels/${hotelId}/${crypto.randomUUID()}.${ext}`;
   return uploadToPath(supabase, bucket, objectPath, file);
 }
+
+/** Room type image: `room-types/{roomTypeId}/{uuid}.ext` inside the same bucket. */
+export async function uploadRoomTypeImage(supabase, bucket, roomTypeId, file, ext) {
+  const objectPath = `room-types/${roomTypeId}/${crypto.randomUUID()}.${ext}`;
+  return uploadToPath(supabase, bucket, objectPath, file);
+}
