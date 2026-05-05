@@ -10,10 +10,12 @@ export default function RoomWishlistButton({ room, hotel, enabled }) {
   return (
     <button
       type="button"
-      className="btn btn-small btn-outline"
+      className="btn btn-small btn-outline room-action-btn room-action-btn--icon"
       onClick={() => toggleMutation.mutate({ add: !isInWishlist })}
+      aria-label={isInWishlist ? t("hotelCard.removeFromFav") : t("hotelCard.addToFav")}
+      title={isInWishlist ? t("hotelCard.removeFromFav") : t("hotelCard.addToFav")}
     >
-      {isInWishlist ? t("hotelCard.removeFromFav") : t("hotelCard.addToFav")}
+      <span aria-hidden>{isInWishlist ? "♥" : "♡"}</span>
     </button>
   );
 }

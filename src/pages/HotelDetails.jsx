@@ -12,10 +12,22 @@ import { compactAddress, money } from "../utils/format";
 import { hasValidHotelLatLng } from "../utils/geo";
 import { useHotelWishlistToggle } from "../hooks/useHotelWishlistToggle";
 import RoomWishlistButton from "../components/RoomWishlistButton";
+import {
+  PAYMENT_METHODS,
+  PaymentContext,
+  getPaymentStrategy,
+} from "../strategies/paymentStrategies";
 
 const HotelsGoogleMap = lazy(() => import("../components/HotelsGoogleMap"));
 
 const ASSISTANT_MEMORY_KEY = "quickreserve-ai-memory-v2";
+const SAVED_CARDS_STORAGE_KEY = "quickreserve-saved-cards-v1";
+const DEFAULT_PAYMENT_DRAFT = {
+  fullName: "",
+  cardNumber: "",
+  expiry: "",
+  cvv: "",
+};
 
 export default function HotelDetails() {
   const { t } = useTranslation();
@@ -35,12 +47,11 @@ export default function HotelDetails() {
   });
   const [quote, setQuote] = useState(null);
   const [paymentOpen, setPaymentOpen] = useState(false);
-  const [paymentDraft, setPaymentDraft] = useState({
-    fullName: "",
-    cardNumber: "",
-    expiry: "",
-    cvv: "",
-  });
+  const [paymentMethod, setPaymentMethod] = useState(PAYMENT_METHODS.CARD);
+  const [paymentDraft, setPaymentDraft] = useState(DEFAULT_PAYMENT_DRAFT);
+  const [savedCards, setSavedCards] = useState([]);
+  const [saveCardForNextTime, setSaveCardForNextTime] = useState(true);
+  const [activeSavedCardIndex, setActiveSavedCardIndex] = useState(null);
   const [pendingBook, setPendingBook] = useState(false);
 
   const hotelQuery = useQuery({
@@ -76,11 +87,18 @@ export default function HotelDetails() {
         endDate: dates.checkOut,
       }),
     onSuccess: async (booking) => {
-      const payment = await bookingApi.createPayment(booking.id);
-      await bookingApi.processPayment(payment.id, true);
-      const confirmed = await bookingApi.confirmBooking(booking.id);
+      const paymentContext = new PaymentContext(getPaymentStrategy(paymentMethod));
+      const paymentPromise = paymentContext.executePayment({ bookingId: booking.id, bookingApi });
+      const confirmPromise = bookingApi.confirmBooking(booking.id);
+      const [paymentResult, confirmed] = await Promise.all([paymentPromise, confirmPromise]);
       navigate(`/confirmation/${booking.id}`, {
-        state: { booking: confirmed, hotel: hotelQuery.data, room: selectedRoom, payment },
+        state: {
+          booking: confirmed,
+          hotel: hotelQuery.data,
+          room: selectedRoom,
+          payment: paymentResult,
+          paymentMethod,
+        },
       });
     },
     onSettled: () => setPendingBook(false),
@@ -177,6 +195,62 @@ export default function HotelDetails() {
     console.info("[BookingUi] HotelDetails dates synced", dates);
   }, [dates.checkIn, dates.checkOut, dates.guests, updateBookingUi]);
 
+  useEffect(() => {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(SAVED_CARDS_STORAGE_KEY) || "[]");
+      if (Array.isArray(parsed)) {
+        setSavedCards(parsed);
+      }
+    } catch {
+      setSavedCards([]);
+    }
+  }, []);
+
+  function maskCardNumber(cardNumber) {
+    const digits = String(cardNumber || "").replace(/\D/g, "");
+    const suffix = digits.slice(-4);
+    return suffix ? `**** **** **** ${suffix}` : "****";
+  }
+
+  function getCardBrand(cardNumber) {
+    const digits = String(cardNumber || "").replace(/\D/g, "");
+    if (digits.startsWith("4")) return "VISA";
+    if (/^5[1-5]/.test(digits)) return "MASTERCARD";
+    if (/^3[47]/.test(digits)) return "AMEX";
+    return "CARD";
+  }
+
+  function saveCardIfNeeded() {
+    if (paymentMethod !== PAYMENT_METHODS.CARD || !saveCardForNextTime) return;
+    if (!paymentDraft.cardNumber || !paymentDraft.fullName || !paymentDraft.expiry) return;
+    const normalized = {
+      fullName: paymentDraft.fullName.trim(),
+      cardNumber: paymentDraft.cardNumber.trim(),
+      expiry: paymentDraft.expiry.trim(),
+      cvv: paymentDraft.cvv.trim(),
+    };
+    const alreadyExists = savedCards.some(
+      (card) =>
+        card.cardNumber.replace(/\s/g, "") === normalized.cardNumber.replace(/\s/g, "") &&
+        card.expiry === normalized.expiry,
+    );
+    if (alreadyExists) return;
+    const next = [normalized, ...savedCards].slice(0, 4);
+    setSavedCards(next);
+    localStorage.setItem(SAVED_CARDS_STORAGE_KEY, JSON.stringify(next));
+  }
+
+  function applySavedCard(card, index) {
+    setActiveSavedCardIndex(index);
+    setPaymentDraft({
+      fullName: card.fullName || "",
+      cardNumber: card.cardNumber || "",
+      expiry: card.expiry || "",
+      cvv: card.cvv || "",
+    });
+    setPaymentMethod(PAYMENT_METHODS.CARD);
+  }
+
   if (hotelQuery.isLoading) {
     return <div className="container empty-state">{t("hotelDetail.loadingHotel")}</div>;
   }
@@ -267,7 +341,7 @@ export default function HotelDetails() {
               <div className="room-list">
                 {rooms.map((room) => (
                   <article
-                    className={`room-card ${Number(selectedRoom?.id) === Number(room.id) ? "room-card--selected" : ""}`}
+                    className="room-card room-card--hotel-detail"
                     key={room.id}
                   >
                     <div className="room-card__media" aria-hidden>
@@ -277,7 +351,7 @@ export default function HotelDetails() {
                         <span className="room-card__mediaFallback">Room</span>
                       )}
                     </div>
-                    <div>
+                    <div className="room-card__content">
                       <h3>{room.name}</h3>
                       <p>{room.description || t("hotelDetail.defaultRoomDescription")}</p>
                       <div className="amenity-row">
@@ -291,18 +365,18 @@ export default function HotelDetails() {
                     <div className="room-price">
 
                       <strong>{money(room.basePrice)} {t("hotelDetail.perNight")}</strong>
-                      <button className="btn btn-teal" onClick={() => quoteMutation.mutate(room)}>
+                      <button className="btn btn-teal room-action-btn room-action-btn--primary" onClick={() => quoteMutation.mutate(room)}>
                         {t("hotelDetail.checkAvailability")}
                       </button>
                       {auth.isAuthenticated ? (
-                        <div style={{ display: "flex", gap: "8px", marginTop: "8px", flexWrap: "wrap" }}>
+                        <div className="room-actions">
                           <RoomWishlistButton
                             room={room}
                             hotel={hotel}
                             enabled={auth.isAuthenticated && auth.hasPermission("wishlist:manage")}
                           />
                           <button
-                            className="btn btn-small btn-outline"
+                            className="btn btn-small btn-outline room-action-btn"
                             type="button"
                             onClick={() => {
                               setAlertOpenFor(room.id);
@@ -378,7 +452,13 @@ export default function HotelDetails() {
 
           {paymentOpen ? (
             <div className="modal-backdrop" role="presentation" onClick={() => !pendingBook && setPaymentOpen(false)}>
-              <div className="modal" role="dialog" aria-label={t("hotelDetail.mockPaymentAria")} onClick={(e) => e.stopPropagation()}>
+              <div
+                className="modal"
+                role="dialog"
+                aria-label={t("hotelDetail.mockPaymentAria")}
+                onClick={(e) => e.stopPropagation()}
+                style={{ maxHeight: "90vh", overflowY: "auto" }}
+              >
                 <div className="modal-head">
                   <h2>{t("hotelDetail.mockPaymentTitle")}</h2>
                   <button className="btn btn-small btn-outline" type="button" disabled={pendingBook} onClick={() => setPaymentOpen(false)}>
@@ -391,9 +471,108 @@ export default function HotelDetails() {
                   onSubmit={(e) => {
                     e.preventDefault();
                     setPendingBook(true);
+                    saveCardIfNeeded();
                     bookingMutation.mutate();
                   }}
                 >
+                  <label>
+                    Payment method
+                    <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)}>
+                      <option value={PAYMENT_METHODS.CARD}>Credit card</option>
+                      <option value={PAYMENT_METHODS.CASH}>Cash at check-in</option>
+                    </select>
+                  </label>
+
+                  {savedCards.length > 0 ? (
+                    <div>
+                      <p style={{ margin: "0 0 8px", fontWeight: 700 }}>Saved cards</p>
+                      <div
+                        style={{
+                          position: "relative",
+                          margin: "0 auto",
+                          width: "min(100%, 420px)",
+                          height: `${265 + Math.max(0, savedCards.length - 1) * 14}px`,
+                        }}
+                      >
+                        {savedCards.map((card, index) => {
+                          const isSelected = activeSavedCardIndex === index;
+                          const isCashMode = paymentMethod === PAYMENT_METHODS.CASH;
+                          const depth = Math.max(0, savedCards.length - 1 - index);
+                          return (
+                          <button
+                            key={`${card.cardNumber}-${card.expiry}-${index}`}
+                            type="button"
+                            disabled={pendingBook}
+                            style={{
+                              position: "absolute",
+                              left: 0,
+                              right: 0,
+                              margin: "0 auto",
+                              top: `${depth * 16}px`,
+                              zIndex: isSelected ? savedCards.length + 10 : savedCards.length - index,
+                              textAlign: "left",
+                              border: isSelected ? "2px solid #7dd3fc" : "1px solid #2b5da8",
+                              borderRadius: "18px",
+                              padding: "14px 16px",
+                              color: "#eef6ff",
+                              background: depth % 2 === 0
+                                ? "linear-gradient(155deg, #123c80 0%, #1e66c5 58%, #0b2f63 100%)"
+                                : "linear-gradient(155deg, #0f3572 0%, #2a77d1 55%, #0a2a59 100%)",
+                              boxShadow: isSelected
+                                ? "0 0 0 3px rgba(125,211,252,0.22), 0 14px 30px rgba(8,25,52,0.5)"
+                                : "0 10px 24px rgba(8,25,52,0.42)",
+                              cursor: pendingBook ? "not-allowed" : "pointer",
+                              transition: "transform 0.12s ease, box-shadow 0.2s ease, border-color 0.2s ease, filter 0.2s ease, opacity 0.2s ease",
+                              width: "min(100%, 420px)",
+                              aspectRatio: "1.586 / 1",
+                              display: "flex",
+                              flexDirection: "column",
+                              justifyContent: "space-between",
+                              transform: isSelected ? "translateY(-4px)" : `translateY(${Math.min(6, depth * 2)}px)`,
+                              opacity: isCashMode ? (isSelected ? 0.78 : 0.62) : 1,
+                              filter: isCashMode ? "saturate(0.4) brightness(0.9)" : "none",
+                            }}
+                            onClick={() => applySavedCard(card, index)}
+                          >
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+                              <span
+                                style={{
+                                  width: "34px",
+                                  height: "24px",
+                                  borderRadius: "6px",
+                                  background: "linear-gradient(145deg, #d7b96d 0%, #f3dea0 40%, #caa44f 100%)",
+                                  boxShadow: "inset 0 0 0 1px rgba(84,56,10,0.28)",
+                                  display: "inline-block",
+                                }}
+                                aria-hidden
+                              />
+                              <span style={{ fontSize: "1.03rem", fontWeight: 900, fontStyle: "italic", letterSpacing: "0.04em" }}>VISA</span>
+                            </div>
+                            <div style={{ fontSize: "1.2rem", fontWeight: 800, letterSpacing: "0.14em", marginBottom: "10px" }}>
+                              {maskCardNumber(card.cardNumber)}
+                            </div>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: "8px" }}>
+                              <div>
+                                <div style={{ fontSize: "0.66rem", opacity: 0.8, textTransform: "uppercase" }}>Card holder</div>
+                                <div style={{ fontSize: "0.9rem", fontWeight: 700 }}>{card.fullName || "Guest"}</div>
+                              </div>
+                              <div style={{ textAlign: "right" }}>
+                                <div style={{ fontSize: "0.66rem", opacity: 0.8, textTransform: "uppercase" }}>Expires</div>
+                                <div style={{ fontSize: "0.9rem", fontWeight: 700 }}>{card.expiry}</div>
+                              </div>
+                            </div>
+                            <div style={{ fontSize: "0.62rem", opacity: 0.8, marginTop: "8px", letterSpacing: "0.05em" }}>
+                              {getCardBrand(card.cardNumber)} DEBIT
+                            </div>
+                          </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {paymentMethod === PAYMENT_METHODS.CARD ? (
+                    <>
                   <label>
                     {t("hotelDetail.fullName")}
                     <input value={paymentDraft.fullName} onChange={(e) => setPaymentDraft((c) => ({ ...c, fullName: e.target.value }))} required />
@@ -427,6 +606,38 @@ export default function HotelDetails() {
                       />
                     </label>
                   </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <input
+                      id="save-card-for-next-time"
+                      type="checkbox"
+                      checked={saveCardForNextTime}
+                      onChange={(e) => setSaveCardForNextTime(e.target.checked)}
+                      style={{ width: "16px", height: "16px", accentColor: "#0ea5e9", margin: 0 }}
+                    />
+                    <label
+                      htmlFor="save-card-for-next-time"
+                      style={{ margin: 0, padding: 0, border: "none", background: "transparent", cursor: "pointer" }}
+                    >
+                      Save this card for quick checkout next time
+                    </label>
+                  </div>
+                    </>
+                  ) : (
+                    <div
+                      style={{
+                        padding: "12px",
+                        border: "1px solid #93c5fd",
+                        borderRadius: "10px",
+                        background: "#eff6ff",
+                        color: "#1e3a8a",
+                        fontSize: "0.9rem",
+                        fontWeight: 600,
+                        lineHeight: 1.5,
+                      }}
+                    >
+                      You selected cash payment. Your booking will be confirmed now, and payment will be collected at check-in.
+                    </div>
+                  )}
                   <div className="hero-actions" style={{ justifyContent: "space-between" }}>
                     <button
                       type="button"
@@ -441,10 +652,10 @@ export default function HotelDetails() {
                         })
                       }
                     >
-                      {t("hotelDetail.autofill")}
+                      Fill test card
                     </button>
                     <button className="btn btn-primary" disabled={pendingBook}>
-                      {pendingBook ? t("hotelDetail.processing") : t("hotelDetail.payAndBook")}
+                      {pendingBook ? t("hotelDetail.processing") : paymentMethod === PAYMENT_METHODS.CARD ? t("hotelDetail.payAndBook") : "Book now (pay cash)"}
                     </button>
                   </div>
                 </form>
