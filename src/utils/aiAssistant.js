@@ -71,33 +71,64 @@ function levenshteinDistance(a, b) {
 function findClosestCityAlias(input) {
   const candidate = compactAscii(input);
   if (!candidate) return null;
+  if (candidate.length < 4) return null;
 
   const scored = CITY_ALIASES.map((row) => {
     const english = compactAscii(row.en);
     if (!english) return null;
+    if (candidate[0] !== english[0]) return null;
     const distance = levenshteinDistance(candidate, english);
     const includesBonus = english.includes(candidate) || candidate.includes(english) ? -1 : 0;
-    return { city: row.en, score: distance + includesBonus };
+    const score = distance + includesBonus;
+    const ratio = distance / Math.max(candidate.length, english.length);
+    return { city: row.en, score, ratio };
   })
     .filter(Boolean)
     .sort((a, b) => a.score - b.score);
 
   if (!scored.length) return null;
   const best = scored[0];
+  const threshold = Math.max(1, Math.floor(candidate.length * 0.22));
+  const ratioThreshold = 0.25;
+  return best.score <= threshold && best.ratio <= ratioThreshold ? best.city : null;
+}
+
+function findSuggestedCityAlias(input) {
+  const candidate = compactAscii(input);
+  if (!candidate || candidate.length < 4) return null;
+  const scored = CITY_ALIASES.map((row) => {
+    const english = compactAscii(row.en);
+    if (!english) return null;
+    if (candidate[0] !== english[0]) return null;
+    const distance = levenshteinDistance(candidate, english);
+    const ratio = distance / Math.max(candidate.length, english.length);
+    return { city: row.en, distance, ratio };
+  })
+    .filter(Boolean)
+    .sort((a, b) => a.distance - b.distance || a.ratio - b.ratio);
+  if (!scored.length) return null;
+  const best = scored[0];
   const threshold = Math.max(2, Math.floor(candidate.length * 0.34));
-  return best.score <= threshold ? best.city : null;
+  return best.distance <= threshold && best.ratio <= 0.34 ? best.city : null;
+}
+
+export function matchCityBilingual(input) {
+  const n = normalize(input);
+  if (!n) return { status: "none", city: "" };
+  for (const row of CITY_ALIASES) {
+    if (normalize(row.en) === n) return { status: "exact", city: row.en };
+    if (normalize(row.ar) === n) return { status: "exact", city: row.en };
+  }
+  const suggested = findSuggestedCityAlias(input);
+  if (suggested) return { status: "suggested", city: suggested };
+  return { status: "none", city: "" };
 }
 
 export function resolveCityBilingual(input) {
-  const n = normalize(input);
-  if (!n) return "";
-  for (const row of CITY_ALIASES) {
-    if (normalize(row.en) === n) return row.en;
-    if (normalize(row.ar) === n) return row.en;
-  }
-  const fuzzy = findClosestCityAlias(input);
-  if (fuzzy) return fuzzy;
-  return String(input).trim();
+  const match = matchCityBilingual(input);
+  if (match.status === "exact") return match.city;
+  if (match.status === "suggested") return findClosestCityAlias(input) || "";
+  return "";
 }
 
 export function resolveCountryBilingual(input) {
@@ -189,7 +220,11 @@ function isoAddDays(baseIsoYmd, deltaDays) {
  * Offset from "today" (0 = tonight/today stay, 1 = tomorrow, …) for loose user text snippets.
  */
 function relativeDayOffsetFromText(segment) {
-  const sn = normalize(segment);
+  const sn = normalize(
+    String(segment ?? "")
+      .replace(/\btmrw\b/gi, "tomorrow")
+      .replace(/\btomor+o?w*\b/gi, "tomorrow"),
+  );
   // Longest phrase wins so "day after tomorrow" beats "tomorrow"
   let bestIdx = -1;
   let bestLen = -1;
@@ -221,6 +256,13 @@ function relativeDayOffsetFromText(segment) {
 export function parseNaturalDateRange(text, todayIsoFn) {
   const raw = String(text ?? "").trim();
   if (!raw) return null;
+  const typoFixedRaw = raw
+    .replace(/\btomorow\b/gi, "tomorrow")
+    .replace(/\btomorro\b/gi, "tomorrow")
+    .replace(/\btommorow\b/gi, "tomorrow")
+    .replace(/\btomorroww\b/gi, "tomorrow")
+    .replace(/\btmrw\b/gi, "tomorrow")
+    .replace(/\btomor+o?w*\b/gi, "tomorrow");
 
   const anchor =
     typeof todayIsoFn === "function"
@@ -235,7 +277,7 @@ export function parseNaturalDateRange(text, todayIsoFn) {
 
   if (!anchor || !/^\d{4}-\d{2}-\d{2}$/.test(anchor)) return null;
 
-  const lowered = raw.toLowerCase();
+  const lowered = typoFixedRaw.toLowerCase();
   if (!/\b(today|tomorrow|tonight)\b|day\s+after\s+tomorrow/.test(lowered)) return null;
 
   const connectorRe = /\s+(?:to|-|–|—|until|till|'til|through)\s+/i;
@@ -250,8 +292,8 @@ export function parseNaturalDateRange(text, todayIsoFn) {
     return { checkIn, checkOut };
   }
 
-  if (connectorRe.test(raw)) {
-    const pieces = raw.split(connectorRe);
+  if (connectorRe.test(typoFixedRaw)) {
+    const pieces = typoFixedRaw.split(connectorRe);
     if (pieces.length < 2) return null;
     const left = String(pieces[0] || "").replace(/^from\s+/i, "").trim();
     const right = String(pieces[1] || "").trim();
@@ -266,7 +308,7 @@ export function parseNaturalDateRange(text, todayIsoFn) {
   }
 
   // Two phrases separated by commas: “today , tomorrow”
-  const commaSplit = raw.split(/\s*,\s*/);
+  const commaSplit = typoFixedRaw.split(/\s*,\s*/);
   if (commaSplit.length === 2) {
     const oL = relativeDayOffsetFromText(commaSplit[0]);
     const oR = relativeDayOffsetFromText(commaSplit[1]);
@@ -293,14 +335,14 @@ export function parseNaturalDateRange(text, todayIsoFn) {
   }
 
   // Single-day hints (avoid plain “today” alone — too noisy in long sentences)
-  if (/\btonight\b/.test(lowered) && relativeDayOffsetFromText(raw) === 0) {
+  if (/\btonight\b/.test(lowered) && relativeDayOffsetFromText(typoFixedRaw) === 0) {
     if (/\b(check|stay|book|room|night)\b/i.test(lowered)) {
       return finish(isoAddDays(anchor, 0), isoAddDays(anchor, 1));
     }
   }
 
   const onlyTomorrow =
-    /^(?:please\s+)?(?:check[-\s]?in\s+)?tomorrow\b/i.test(raw.trim()) &&
+    /^(?:please\s+)?(?:check[-\s]?in\s+)?tomorrow\b/i.test(typoFixedRaw.trim()) &&
     !/\b(today|tonight)\b/.test(lowered);
   if (onlyTomorrow) {
     return finish(isoAddDays(anchor, 1), isoAddDays(anchor, 2));

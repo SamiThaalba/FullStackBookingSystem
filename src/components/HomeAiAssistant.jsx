@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
-import { bookingApi, buildBookingCreatePayload } from "../api/bookingApi";
+import { bookingApi } from "../api/bookingApi";
 import { useAuth } from "../auth/AuthContext";
 import { useBookingUi } from "../context/BookingUiContext";
-import { parseUserPickIndex, resolveCityBilingual } from "../utils/aiAssistant";
+import { matchCityBilingual, parseUserPickIndex, resolveCityBilingual } from "../utils/aiAssistant";
 import { money } from "../utils/format";
 import { addDaysIso, isIsoOnOrBefore, tomorrowIso } from "../utils/dates";
 
@@ -51,6 +51,35 @@ function isAnyCityIntent(text) {
     value === "any" ||
     value === "anyone" ||
     value.includes("anywhere")
+  );
+}
+
+function isUnsureIntent(text) {
+  const value = String(text || "").toLowerCase().trim();
+  if (!value) return false;
+  const compact = value.replace(/\s+/g, "");
+  return (
+    value === "idk" ||
+    value === "i dont know" ||
+    value === "i don't know" ||
+    value === "not sure" ||
+    value === "unsure" ||
+    value === "whatever" ||
+    compact === "dontknow" ||
+    compact === "idontknow"
+  );
+}
+
+function isResetChatIntent(text) {
+  const value = String(text || "").toLowerCase().trim();
+  if (!value) return false;
+  return (
+    value === "clear" ||
+    value === "clear chat" ||
+    value === "reset" ||
+    value === "reset chat" ||
+    value === "new chat" ||
+    value === "restart chat"
   );
 }
 
@@ -402,6 +431,12 @@ export default function HomeAiAssistant({ cities: _cities } = {}) {
   async function sendMessage(overrideText) {
     const text = (overrideText ?? message).trim();
     if (!text || loading) return;
+    if (isResetChatIntent(text)) {
+      resetConversation();
+      setMessage("");
+      pushTurn("assistant", "Chat reset. You can start again anytime.");
+      return;
+    }
     if (shouldShowGuide(text)) {
       startGuidedFlow();
       setMessage("");
@@ -425,9 +460,33 @@ export default function HomeAiAssistant({ cities: _cities } = {}) {
         // Step 1: city (or any city)
         if (!hasCity) {
           const any = isAnyCityIntent(normalizedText);
-          const resolved = any ? "" : resolveCityBilingual(normalizedText);
+          if (!any && isUnsureIntent(normalizedText)) {
+            pushTurn(
+              "assistant",
+              "No problem. If you are not sure about city, just say: any city. Then I will show available hotels in Palestine.",
+              withUser,
+              context,
+            );
+            return;
+          }
+          const cityMatch = any ? { status: "exact", city: "" } : matchCityBilingual(normalizedText);
+          if (!any && cityMatch.status === "suggested") {
+            pushTurn(
+              "assistant",
+              `I couldn't find "${normalizedText}" as a city in Palestine. Did you mean ${cityMatch.city}?`,
+              withUser,
+              context,
+            );
+            return;
+          }
+          const resolved = any ? "" : cityMatch.city;
           if (!any && !resolved) {
-            pushTurn("assistant", getGuideQuestion(context, confirmDraft), withUser, context);
+            pushTurn(
+              "assistant",
+              `There is no city called "${normalizedText}" in Palestine. Please enter a valid city like Bethlehem, Jerusalem, Ramallah, Nablus, Hebron, or Gaza.`,
+              withUser,
+              context,
+            );
             return;
           }
 
@@ -519,6 +578,25 @@ export default function HomeAiAssistant({ cities: _cities } = {}) {
           "assistant",
           "Great, any city works. Tell me your check-in date, check-out date, and number of guests.",
           withUser,
+        );
+        return;
+      }
+
+      if (
+        isUnsureIntent(normalizedText) &&
+        !context?.city &&
+        !context?.anyCity &&
+        !Number(context?.selectedHotelId || 0)
+      ) {
+        const anyContext = { ...context, anyCity: true, city: "" };
+        setContext(anyContext);
+        saveMemory({ context: anyContext, history: withUser });
+        navigateWithContext({ navigate, updateBookingUi, ctx: anyContext, fallbackGuests: 1 });
+        pushTurn(
+          "assistant",
+          "No problem — I will search across any city in Palestine. Now tell me your check-in, check-out, and number of guests.",
+          withUser,
+          anyContext,
         );
         return;
       }
@@ -627,7 +705,7 @@ export default function HomeAiAssistant({ cities: _cities } = {}) {
     }
   }
 
-  async function confirmBooking() {
+  async function continueToPayment() {
     if (!confirmDraft || loading) return;
     if (!auth.isAuthenticated) {
       pushTurn("assistant", "Please log in to complete your booking.");
@@ -640,34 +718,38 @@ export default function HomeAiAssistant({ cities: _cities } = {}) {
       setConfirmDraft(null);
       return;
     }
-    if (!confirmDraft.paymentMethod) {
-      pushTurn("assistant", "Please select a payment method before I complete the booking.");
-      return;
-    }
-
-    setLoading(true);
-    const baseChat = [...chat];
-    try {
-      const booking = await bookingApi.createBooking(buildBookingCreatePayload(confirmDraft));
-      const payment = await bookingApi.createPayment(booking.id);
-      await bookingApi.processPayment(payment.id, true);
-      const confirmed = await bookingApi.confirmBooking(booking.id);
-
-      pushTurn("assistant", "Your booking is confirmed. Opening your confirmation page.", baseChat);
-      navigate(`/confirmation/${booking.id}`, {
-        state: { booking: confirmed, hotel: confirmDraft.hotel, room: confirmDraft.room, payment },
-      });
-      setConfirmDraft(null);
-    } catch (err) {
-      pushTurn("assistant", humanizeError(err) + " You can retry confirmation or adjust details.", baseChat);
-    } finally {
-      setLoading(false);
-    }
+    const q = new URLSearchParams();
+    if (confirmDraft.hotel?.city) q.set("city", confirmDraft.hotel.city);
+    q.set("from", confirmDraft.checkIn);
+    q.set("to", confirmDraft.checkOut);
+    q.set("guests", String(confirmDraft.guests));
+    updateBookingUi({
+      city: confirmDraft.hotel?.city || "",
+      checkInDate: confirmDraft.checkIn,
+      checkOutDate: confirmDraft.checkOut,
+      guests: Number(confirmDraft.guests || 1),
+    });
+    pushTurn("assistant", "Opening payment form. Choose card or cash and finish booking there.");
+    navigate(`/hotels/${confirmDraft.hotel.id}?${q.toString()}#room-types`, {
+      state: {
+        intent: {
+          hotelId: confirmDraft.hotel.id,
+          roomTypeId: confirmDraft.room.id,
+          checkIn: confirmDraft.checkIn,
+          checkOut: confirmDraft.checkOut,
+          guests: Number(confirmDraft.guests || 1),
+          fromAssistant: true,
+          openPayment: true,
+        },
+      },
+    });
+    setConfirmDraft(null);
   }
 
   function resetConversation() {
     setContext({});
     setChat([]);
+    setMessage("");
     setGuideEnabled(false);
     setConfirmDraft(null);
     saveMemory({ context: {}, history: [] });
@@ -844,18 +926,8 @@ export default function HomeAiAssistant({ cities: _cities } = {}) {
       <div className="home-ai__confirm">
         {confirmDraft ? (
           <>
-            <select
-              value={confirmDraft.paymentMethod || ""}
-              onChange={(e) =>
-                setConfirmDraft((current) => (current ? { ...current, paymentMethod: e.target.value } : current))
-              }
-              disabled={loading}
-            >
-              <option value="">{t("assistant.selectPayment")}</option>
-              <option value="mock_card">{t("assistant.paymentCard")}</option>
-            </select>
-            <button type="button" className="btn btn-primary" onClick={confirmBooking} disabled={loading}>
-              {t("assistant.confirmBooking")}
+            <button type="button" className="btn btn-primary" onClick={continueToPayment} disabled={loading}>
+              Continue to payment
             </button>
             <button type="button" className="btn btn-outline" onClick={() => setConfirmDraft(null)} disabled={loading}>
               {t("assistant.cancel")}

@@ -179,6 +179,14 @@ export default function HotelDetails() {
       checkOut: resumeIntent.checkOut || current.checkOut,
       guests: Number(resumeIntent.guests || current.guests),
     }));
+
+    if (resumeIntent.openPayment) {
+      quoteMutation.mutate(roomMatch, {
+        onSuccess: () => {
+          setPaymentOpen(true);
+        },
+      });
+    }
   }, [rooms, selectedRoom]);
 
   useEffect(() => {

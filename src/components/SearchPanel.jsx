@@ -60,11 +60,14 @@ export default function SearchPanel({
   }, []);
 
   useEffect(() => {
+    const guestsFromUi = Math.max(1, Number(bookingUi.guests || 1));
     setForm((current) => ({
       ...current,
       city: bookingUi.city || current.city,
       from: bookingUi.checkInDate || current.from,
       to: bookingUi.checkOutDate || current.to,
+      adults: guestsFromUi,
+      children: 0,
     }));
     console.info("[BookingUi] SearchPanel received shared state", bookingUi);
   }, [bookingUi.city, bookingUi.checkInDate, bookingUi.checkOutDate, bookingUi.guests]);

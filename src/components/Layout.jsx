@@ -74,8 +74,10 @@ export default function Layout() {
       <header className="site-header">
         <nav className="nav container">
           <NavLink to="/" className="brand" aria-label={t("layout.brandAria")}>
+            <span className="brand-logo-wrap" aria-hidden>
+              <img className="brand-logo" src="/logo.png" alt="" />
+            </span>
             <span>QuickReserve</span>
-            <span className="moon">crescent</span>
           </NavLink>
 
           <div className="nav-links">
@@ -154,8 +156,10 @@ export default function Layout() {
         <div className="container footer-grid">
           <div>
             <div className="brand footer-brand">
+              <span className="brand-logo-wrap" aria-hidden>
+                <img className="brand-logo" src="/logo.png" alt="" />
+              </span>
               <span>QuickReserve</span>
-              <span className="moon">crescent</span>
             </div>
             <p>{t("layout.footerTagline")}</p>
           </div>
