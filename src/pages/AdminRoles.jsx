@@ -90,6 +90,7 @@ export default function AdminRoles() {
   });
   const activityLogsQuery = useQuery({
     queryKey: ["admin-activity-logs", activityFilters, showOnlyLastThreeActivity],
+    enabled: Boolean(activityFilters.userId),
     queryFn: async () => {
       const baseParams = {
         userId: activityFilters.userId || undefined,
@@ -98,7 +99,7 @@ export default function AdminRoles() {
         toDate: activityFilters.toDate || undefined,
       };
 
-      // Optional compact mode for both selected and non-selected users.
+      // Optional compact mode for selected user.
       if (showOnlyLastThreeActivity) {
         return bookingApi.adminActivityLogs({
           ...baseParams,
@@ -107,16 +108,7 @@ export default function AdminRoles() {
         });
       }
 
-      // For selected user in full mode: fetch all pages for that user.
-      // For no selected user in full mode: keep the default page size.
-      if (!activityFilters.userId) {
-        return bookingApi.adminActivityLogs({
-          ...baseParams,
-          page: 0,
-          size: 20,
-        });
-      }
-
+      // Full mode for selected user: fetch all pages for that user.
       const pageSize = 50;
       let page = 0;
       let totalPages = 1;
@@ -557,7 +549,7 @@ export default function AdminRoles() {
       {/* ── Row 4: User activity analytics ── */}
       <div className="panel user-role-panel">
         <h2>User activity analytics</h2>
-        <p className="muted">Tracks actions from users with manager-level permissions.</p>
+        <p className="muted">Tracks write operations (POST, PUT/PATCH, DELETE) for the selected user only.</p>
         <div className="user-role-fields user-role-fields--single">
           <label>
             User name
@@ -627,7 +619,6 @@ export default function AdminRoles() {
               <option value="CREATE">CREATE</option>
               <option value="UPDATE">UPDATE</option>
               <option value="DELETE">DELETE</option>
-              <option value="VIEW">VIEW</option>
             </select>
           </label>
           <label>
@@ -654,7 +645,9 @@ export default function AdminRoles() {
             />
           </label>
         </div>
-        {activityLogsQuery.isLoading ? (
+        {!activityFilters.userId ? (
+          <p className="muted">Select a user first to view their activity history.</p>
+        ) : activityLogsQuery.isLoading ? (
           <p className="muted">Loading activity logs...</p>
         ) : activityRows.length ? (
           <div className="manager-list">

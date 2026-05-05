@@ -35,6 +35,9 @@ public class UserActivityLogInterceptor implements HandlerInterceptor {
         try {
             AppUser currentUser = currentUserProvider.getCurrentUser();
             String actionType = mapActionType(request.getMethod());
+            if (actionType == null) {
+                return;
+            }
             String resourceType = null;
             String resourceId = null;
 
@@ -61,7 +64,6 @@ public class UserActivityLogInterceptor implements HandlerInterceptor {
         if ("POST".equalsIgnoreCase(method)) return "CREATE";
         if ("PUT".equalsIgnoreCase(method) || "PATCH".equalsIgnoreCase(method)) return "UPDATE";
         if ("DELETE".equalsIgnoreCase(method)) return "DELETE";
-        if ("GET".equalsIgnoreCase(method)) return "VIEW";
-        return method.toUpperCase();
+        return null;
     }
 }
