@@ -2104,6 +2104,17 @@ button.hotel-map-label {
   margin-top: 16px;
 }
 
+.fav-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.fav-btn svg {
+  color: color-mix(in srgb, var(--purple) 70%, var(--teal));
+}
+
 .gallery-card {
   min-height: 260px;
   border-radius: 22px;
@@ -2657,6 +2668,7 @@ button.notif-row--btn:disabled {
   background: var(--surface);
   box-shadow: var(--shadow);
   overflow: hidden;
+  position: relative;
 }
 
 .assistant-panel--embedded {
@@ -2821,6 +2833,144 @@ button.notif-row--btn:disabled {
   color: var(--ink);
   padding: 0.35rem 0.5rem;
 }
+/* ── Pick-dialog trigger chip ────────────────────────────────────────────── */
+.assistant-pickTrigger {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 9px 14px;
+  border: 1.5px dashed color-mix(in srgb, var(--teal) 55%, var(--line));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--teal) 6%, var(--surface));
+  color: var(--teal);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.assistant-pickTrigger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--teal) 14%, var(--surface));
+  border-color: var(--teal);
+}
+.assistant-pickTrigger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── Dialog overlay (scoped inside the panel) ────────────────────────────── */
+.assistant-dialogBackdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  background: color-mix(in srgb, var(--surface) 30%, transparent);
+  backdrop-filter: blur(3px);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  border-radius: 16px;
+  animation: assistantFadeIn 0.15s ease;
+}
+
+@keyframes assistantFadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.assistant-dialog {
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 18px 18px 0 0;
+  box-shadow: 0 -4px 24px rgba(0,0,0,0.12);
+  max-height: 72%;
+  display: flex;
+  flex-direction: column;
+  animation: assistantSlideUp 0.18s cubic-bezier(.22,1,.36,1);
+}
+
+@keyframes assistantSlideUp {
+  from { transform: translateY(100%); }
+  to   { transform: translateY(0); }
+}
+
+.assistant-dialogHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+
+.assistant-dialogHead strong {
+  font-size: 0.88rem;
+  color: var(--ink);
+}
+
+.assistant-dialogClose {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.assistant-dialogClose:hover {
+  background: var(--bg);
+  color: var(--ink);
+}
+
+.assistant-dialogList {
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.assistant-dialogItem {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+.assistant-dialogItem:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--teal) 8%, var(--surface));
+  border-color: color-mix(in srgb, var(--teal) 40%, var(--line));
+}
+.assistant-dialogItem--selected {
+  border-color: var(--teal);
+  background: color-mix(in srgb, var(--teal) 12%, var(--surface));
+}
+.assistant-dialogItem:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.assistant-dialogItem__name {
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+.assistant-dialogItem__meta {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
 
 .home-ai {
   position: relative;

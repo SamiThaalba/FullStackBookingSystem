@@ -1,5 +1,22 @@
 import { apiRequest } from "./client";
 
+function sortHotelsByName(list) {
+    return [...(list || [])].sort((a, b) =>
+        String(a?.name || "").localeCompare(String(b?.name || ""), undefined, { sensitivity: "base" }),
+    );
+}
+
+function sortRoomTypesByPrice(list) {
+    return [...(list || [])].sort((a, b) => {
+        const ap = Number(a?.basePrice ?? 0);
+        const bp = Number(b?.basePrice ?? 0);
+        if (!Number.isFinite(ap) && !Number.isFinite(bp)) return 0;
+        if (!Number.isFinite(ap)) return 1;
+        if (!Number.isFinite(bp)) return -1;
+        return ap - bp;
+    });
+}
+
 export const bookingApi = {
     login:(payload)=>apiRequest("/auth/login",{method:"POST",body:JSON.stringify(payload)}),
     register:(payload)=>apiRequest("/auth/register",{method:"POST",body:JSON.stringify(payload)}),
@@ -7,18 +24,33 @@ export const bookingApi = {
     logout:(refreshToken)=>apiRequest("/auth/logout",{method:"POST",body:JSON.stringify({refreshToken})}),
     syncUiLanguage:(language)=>apiRequest("/me/ui-language",{method:"PATCH",body:JSON.stringify({language})}),
     patchAvatar:(payload)=>apiRequest("/me/avatar",{method:"PATCH",body:JSON.stringify(payload)}),
-    listHotels:(params)=>apiRequest(`/hotels?${toQuery(params)}`),
+    listHotels: async (params) => {
+        const res = await apiRequest(`/hotels?${toQuery(params)}`);
+        // Spring Page response: { content: [...] }
+        if (res && Array.isArray(res.content)) {
+            return { ...res, content: sortHotelsByName(res.content) };
+        }
+        // Fallback: if backend returns an array
+        if (Array.isArray(res)) return sortHotelsByName(res);
+        return res;
+    },
     listCountries:()=>apiRequest("/countries"),
     listCities:(params={})=>apiRequest(`/cities?${toQuery(params)}`),
     getHotel:(id)=>apiRequest(`/hotels/${id}`),
     // FIX: dedicated endpoint — returns only the current manager's hotels
-    getMyHotels:()=>apiRequest("/hotels/my"),
+    getMyHotels: async () => {
+        const res = await apiRequest("/hotels/my");
+        return Array.isArray(res) ? sortHotelsByName(res) : res;
+    },
     createHotel:(payload)=>apiRequest("/hotels",{method:"POST",body:JSON.stringify(payload)}),
     updateHotel:(id,payload)=>apiRequest(`/hotels/${id}`,{method:"PUT",body:JSON.stringify(payload)}),
     // FIX: patch for partial updates (edit hotel form)
     patchHotel:(id,payload)=>apiRequest(`/hotels/${id}`,{method:"PATCH",body:JSON.stringify(payload)}),
     deleteHotel:(id)=>apiRequest(`/hotels/${id}`,{method:"DELETE"}),
-    getRoomTypes:(hotelId)=>apiRequest(`/room-type/hotel/${hotelId}`),
+    getRoomTypes: async (hotelId) => {
+        const res = await apiRequest(`/room-type/hotel/${hotelId}`);
+        return Array.isArray(res) ? sortRoomTypesByPrice(res) : res;
+    },
     getRoomType:(roomTypeId)=>apiRequest(`/room-type/${roomTypeId}`),
     createRoomType:(payload)=>apiRequest("/room-type",{method:"POST",body:JSON.stringify(payload)}),
     updateRoomType:(id,payload)=>apiRequest(`/room-type/${id}`,{method:"PUT",body:JSON.stringify(payload)}),
@@ -41,7 +73,6 @@ export const bookingApi = {
     notifications:()=>apiRequest("/notifications"),
     markNotificationRead:(id)=>apiRequest(`/notifications/${id}/read`,{method:"PATCH"}),
     markAllNotificationsRead:()=>apiRequest("/notifications/read-all",{method:"PATCH"}),
-    unreadNotificationCount:()=>apiRequest("/notifications/unread-count"),
     adminRoles:()=>apiRequest("/admin/roles"),
     adminPermissions:()=>apiRequest("/admin/permissions"),
     adminCreateRole:(payload)=>apiRequest("/admin/roles",{method:"POST",body:JSON.stringify(payload)}),

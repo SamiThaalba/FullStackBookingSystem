@@ -1,22 +1,31 @@
 const CITY_ALIASES = [
-  { en: "Ramallah", ar: "رام الله" },
-  { en: "Jerusalem", ar: "القدس" },
-  { en: "Bethlehem", ar: "بيت لحم" },
-  { en: "Hebron", ar: "الخليل" },
-  { en: "Nablus", ar: "نابلس" },
-  { en: "Jericho", ar: "أريحا" },
-  { en: "Jenin", ar: "جنين" },
-  { en: "Tulkarm", ar: "طولكرم" },
-  { en: "Qalqilya", ar: "قلقيلية" },
-  { en: "Salfit", ar: "سلفيت" },
-  { en: "Tubas", ar: "طوباس" },
-  { en: "Gaza", ar: "غزة" },
-  { en: "Khan Yunis", ar: "خان يونس" },
-  { en: "Rafah", ar: "رفح" },
+  // Palestine
+  { en: "Ramallah", ar: "رام الله", countryEn: "Palestine", countryAr: "فلسطين" },
+  { en: "Jerusalem", ar: "القدس", countryEn: "Palestine", countryAr: "فلسطين" },
+  { en: "Bethlehem", ar: "بيت لحم", countryEn: "Palestine", countryAr: "فلسطين" },
+  { en: "Hebron", ar: "الخليل", countryEn: "Palestine", countryAr: "فلسطين" },
+  { en: "Nablus", ar: "نابلس", countryEn: "Palestine", countryAr: "فلسطين" },
+  { en: "Jericho", ar: "أريحا", countryEn: "Palestine", countryAr: "فلسطين" },
+  { en: "Jenin", ar: "جنين", countryEn: "Palestine", countryAr: "فلسطين" },
+  { en: "Tulkarm", ar: "طولكرم", countryEn: "Palestine", countryAr: "فلسطين" },
+  { en: "Qalqilya", ar: "قلقيلية", countryEn: "Palestine", countryAr: "فلسطين" },
+  { en: "Salfit", ar: "سلفيت", countryEn: "Palestine", countryAr: "فلسطين" },
+  { en: "Tubas", ar: "طوباس", countryEn: "Palestine", countryAr: "فلسطين" },
+  { en: "Gaza", ar: "غزة", countryEn: "Palestine", countryAr: "فلسطين" },
+  { en: "Khan Yunis", ar: "خان يونس", countryEn: "Palestine", countryAr: "فلسطين" },
+  { en: "Rafah", ar: "رفح", countryEn: "Palestine", countryAr: "فلسطين" },
+
+  // Jordan (add more as needed)
+  { en: "Amman", ar: "عمان", countryEn: "Jordan", countryAr: "الأردن" },
+  { en: "Irbid", ar: "إربد", countryEn: "Jordan", countryAr: "الأردن" },
+  { en: "Zarqa", ar: "الزرقاء", countryEn: "Jordan", countryAr: "الأردن" },
+  { en: "Aqaba", ar: "العقبة", countryEn: "Jordan", countryAr: "الأردن" },
+  { en: "Madaba", ar: "مادبا", countryEn: "Jordan", countryAr: "الأردن" },
 ];
 
 const COUNTRY_ALIASES = [
   { en: "Palestine", ar: "فلسطين" },
+  { en: "Jordan", ar: "الاردن" },
 ];
 
 function normalize(s) {
@@ -164,21 +173,158 @@ export function parseUserPickIndex(text) {
   return null;
 }
 
+/** `YYYY-MM-DD` + local-calendar day delta → ISO date string */
+function isoAddDays(baseIsoYmd, deltaDays) {
+  const parts = String(baseIsoYmd || "").split("-").map(Number);
+  const dt = new Date(parts[0], (parts[1] || 1) - 1, parts[2] || 1);
+  if (Number.isNaN(dt.getTime())) return "";
+  dt.setDate(dt.getDate() + Number(deltaDays || 0));
+  const y = dt.getFullYear();
+  const m = String(dt.getMonth() + 1).padStart(2, "0");
+  const d = String(dt.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+/**
+ * Offset from "today" (0 = tonight/today stay, 1 = tomorrow, …) for loose user text snippets.
+ */
+function relativeDayOffsetFromText(segment) {
+  const sn = normalize(segment);
+  // Longest phrase wins so "day after tomorrow" beats "tomorrow"
+  let bestIdx = -1;
+  let bestLen = -1;
+  let offset = /** @type {number | null} */ (null);
+  const phrases = /** @type {const} */ ([
+    ["day after tomorrow", 2],
+    ["tomorrow", 1],
+    ["tonight", 0],
+    ["today", 0],
+  ]);
+  for (const [phrase, off] of phrases) {
+    const ix = sn.indexOf(normalize(phrase));
+    if (ix >= 0 && phrase.replace(/\s+/g, "").length > bestLen) {
+      bestLen = phrase.replace(/\s+/g, "").length;
+      bestIdx = ix;
+      offset = off;
+    }
+  }
+  if (offset !== null && bestIdx >= 0) return offset;
+  return null;
+}
+
+/**
+ * Parses phrases like “today to tomorrow”, “from today until tomorrow”, “tonight thru tomorrow”.
+ * Returns `{ checkIn, checkOut }` in local ISO; both are calendar dates (checkout is departure morning).
+ *
+ * Pass `todayIsoFn` when the assistant uses `_today` (e.g. for consistent “today”).
+ */
+export function parseNaturalDateRange(text, todayIsoFn) {
+  const raw = String(text ?? "").trim();
+  if (!raw) return null;
+
+  const anchor =
+    typeof todayIsoFn === "function"
+      ? String(todayIsoFn() || "").trim()
+      : (() => {
+          const z = new Date();
+          const y = z.getFullYear();
+          const m = String(z.getMonth() + 1).padStart(2, "0");
+          const d = String(z.getDate()).padStart(2, "0");
+          return `${y}-${m}-${d}`;
+        })();
+
+  if (!anchor || !/^\d{4}-\d{2}-\d{2}$/.test(anchor)) return null;
+
+  const lowered = raw.toLowerCase();
+  if (!/\b(today|tomorrow|tonight)\b|day\s+after\s+tomorrow/.test(lowered)) return null;
+
+  const connectorRe = /\s+(?:to|-|–|—|until|till|'til|through)\s+/i;
+
+  /** @returns {{checkIn:string,checkOut:string}|null} */
+  function finish(checkInIso, checkoutIso) {
+    let checkIn = checkInIso;
+    let checkOut = checkoutIso;
+    if (!checkIn || !checkOut || checkOut <= checkIn) {
+      checkOut = isoAddDays(checkIn, 1);
+    }
+    return { checkIn, checkOut };
+  }
+
+  if (connectorRe.test(raw)) {
+    const pieces = raw.split(connectorRe);
+    if (pieces.length < 2) return null;
+    const left = String(pieces[0] || "").replace(/^from\s+/i, "").trim();
+    const right = String(pieces[1] || "").trim();
+    const oL = relativeDayOffsetFromText(left);
+    const oR = relativeDayOffsetFromText(right);
+    if (oL !== null && oR !== null) {
+      const checkIn = isoAddDays(anchor, oL);
+      const checkOut = isoAddDays(anchor, oR);
+      return finish(checkIn, checkOut);
+    }
+    return null;
+  }
+
+  // Two phrases separated by commas: “today , tomorrow”
+  const commaSplit = raw.split(/\s*,\s*/);
+  if (commaSplit.length === 2) {
+    const oL = relativeDayOffsetFromText(commaSplit[0]);
+    const oR = relativeDayOffsetFromText(commaSplit[1]);
+    if (oL !== null && oR !== null) {
+      return finish(isoAddDays(anchor, oL), isoAddDays(anchor, oR));
+    }
+  }
+
+  // Loose “today … tomorrow” (words not necessarily adjacent to “to”).
+  const todayThenTomorrow =
+    /\b(?:from\s+)?today\b.+?\btomorrow\b/i.test(lowered) && !/\btomorrow\b.+?\btoday\b/i.test(lowered);
+  if (todayThenTomorrow) {
+    return finish(isoAddDays(anchor, 0), isoAddDays(anchor, 1));
+  }
+
+  const tonightTomorrow = /\btonight\b.+?\btomorrow\b/i.test(lowered);
+  if (tonightTomorrow) {
+    return finish(isoAddDays(anchor, 0), isoAddDays(anchor, 1));
+  }
+
+  const tomorrowDat = /\b(tomorrow)\b.+?\b(day\s+after\s+tomorrow)\b/i.test(lowered);
+  if (tomorrowDat) {
+    return finish(isoAddDays(anchor, 1), isoAddDays(anchor, 2));
+  }
+
+  // Single-day hints (avoid plain “today” alone — too noisy in long sentences)
+  if (/\btonight\b/.test(lowered) && relativeDayOffsetFromText(raw) === 0) {
+    if (/\b(check|stay|book|room|night)\b/i.test(lowered)) {
+      return finish(isoAddDays(anchor, 0), isoAddDays(anchor, 1));
+    }
+  }
+
+  const onlyTomorrow =
+    /^(?:please\s+)?(?:check[-\s]?in\s+)?tomorrow\b/i.test(raw.trim()) &&
+    !/\b(today|tonight)\b/.test(lowered);
+  if (onlyTomorrow) {
+    return finish(isoAddDays(anchor, 1), isoAddDays(anchor, 2));
+  }
+
+  return null;
+}
+
 export function extendBilingualCityRows(rows) {
   const out = [...(rows ?? [])];
   const seen = new Set(out.map((r) => `${normalize(r?.name)}|${normalize(r?.countryName)}`));
 
-  for (const { en, ar } of CITY_ALIASES) {
-    // Add Arabic alias as a searchable option (same country unknown).
-    // If an English entry exists already, keep it; we add the Arabic variant too for matching.
-    const keyEn = `${normalize(en)}|`;
-    const keyAr = `${normalize(ar)}|`;
+  for (const { en, ar, countryEn, countryAr } of CITY_ALIASES) {
+    const cEn = countryEn || "";
+    const cAr = countryAr || "";
+    if (!cEn || !cAr) continue;
+    const keyEn = `${normalize(en)}|${normalize(cEn)}`;
+    const keyAr = `${normalize(ar)}|${normalize(cAr)}`;
     if (!seen.has(keyEn)) {
-      out.push({ name: en, countryName: "" });
+      out.push({ name: en, countryName: cEn });
       seen.add(keyEn);
     }
     if (!seen.has(keyAr)) {
-      out.push({ name: ar, countryName: "" });
+      out.push({ name: ar, countryName: cAr });
       seen.add(keyAr);
     }
   }

@@ -751,39 +751,42 @@ export default function Dashboard() {
             {/* ── EDIT ROOM MODAL ── */}
             {editingRoom&&(
                 <div className="modal-backdrop" onClick={()=>setEditingRoom(null)}>
-                    <div className="modal" onClick={e=>e.stopPropagation()}>
+                    <div className="modal modal--scrollable" onClick={e=>e.stopPropagation()}>
                         <div className="modal-head" style={{marginBottom:20}}>
                             <h2>Edit room type</h2>
                             <button style={{border:"none",background:"none",fontSize:"1.4rem",cursor:"pointer",color:"var(--muted)"}} onClick={()=>setEditingRoom(null)}>✕</button>
                         </div>
-                        <div className="dashboard-hotel-image-block" style={{marginBottom:14}}>
-                            <span style={{display:"block",fontWeight:800,fontSize:"0.78rem",textTransform:"uppercase",letterSpacing:"0.05em",color:"var(--muted)",marginBottom:8}}>Room type image</span>
-                            <input ref={editRoomImageInputRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" className="visually-hidden" onChange={(e)=>{ setEditRoomImageFile(e.target.files?.[0]||null); e.target.value=""; }} disabled={blockingRoomSave||updateRoom.isPending} />
-                            <div className="dashboard-hotel-image-preview-wrap">
-                                {editRoomImagePreviewUrl || editingRoom.imageUrl ? (
-                                    <img className="dashboard-hotel-image-preview" src={editRoomImagePreviewUrl || editingRoom.imageUrl} alt="" />
-                                ) : (
-                                    <div className="dashboard-hotel-image-placeholder">No room image</div>
-                                )}
+                        <div className="modal-body">
+                            <div className="dashboard-hotel-image-block" style={{marginBottom:14}}>
+                                <span style={{display:"block",fontWeight:800,fontSize:"0.78rem",textTransform:"uppercase",letterSpacing:"0.05em",color:"var(--muted)",marginBottom:8}}>Room type image</span>
+                                <input ref={editRoomImageInputRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" className="visually-hidden" onChange={(e)=>{ setEditRoomImageFile(e.target.files?.[0]||null); e.target.value=""; }} disabled={blockingRoomSave||updateRoom.isPending} />
+                                <div className="dashboard-hotel-image-preview-wrap">
+                                    {editRoomImagePreviewUrl || editingRoom.imageUrl ? (
+                                        <img className="dashboard-hotel-image-preview" src={editRoomImagePreviewUrl || editingRoom.imageUrl} alt="" />
+                                    ) : (
+                                        <div className="dashboard-hotel-image-placeholder">No room image</div>
+                                    )}
+                                </div>
+                                <div className="dashboard-hotel-image-actions">
+                                    <button type="button" className="btn btn-outline btn-small" disabled={blockingRoomSave||updateRoom.isPending} onClick={()=>editRoomImageInputRef.current?.click()}>Change image</button>
+                                    {editRoomImageFile ? (
+                                        <button type="button" className="btn btn-outline btn-small" disabled={blockingRoomSave||updateRoom.isPending} onClick={()=>setEditRoomImageFile(null)}>Revert to current</button>
+                                    ) : null}
+                                </div>
                             </div>
-                            <div className="dashboard-hotel-image-actions">
-                                <button type="button" className="btn btn-outline btn-small" disabled={blockingRoomSave||updateRoom.isPending} onClick={()=>editRoomImageInputRef.current?.click()}>Change image</button>
-                                {editRoomImageFile ? (
-                                    <button type="button" className="btn btn-outline btn-small" disabled={blockingRoomSave||updateRoom.isPending} onClick={()=>setEditRoomImageFile(null)}>Revert to current</button>
-                                ) : null}
+
+                            <div className="modal-grid" style={{gap:14}}>
+                                {Object.keys(emptyRoom).filter(f=>f!=="hotelId" && f!=="imageUrl").map(field=>(
+                                    <label key={field} style={field==="description"||field==="amenities"?{gridColumn:"1/-1"}:{}}>
+                                        {labelFor(field)}
+                                        <input type={["capacity","inventoryCount","basePrice"].includes(field)?"number":"text"} value={editRoomForm[field]??""} onChange={e=>setEditRoomForm({...editRoomForm,[field]:e.target.value})} min={["capacity","inventoryCount"].includes(field)?1:undefined} step={field==="basePrice"?"0.01":undefined} />
+                                    </label>
+                                ))}
                             </div>
                         </div>
-                        <div className="modal-grid" style={{gap:14}}>
-                            {Object.keys(emptyRoom).filter(f=>f!=="hotelId" && f!=="imageUrl").map(field=>(
-                                <label key={field} style={field==="description"||field==="amenities"?{gridColumn:"1/-1"}:{}}>
-                                    {labelFor(field)}
-                                    <input type={["capacity","inventoryCount","basePrice"].includes(field)?"number":"text"} value={editRoomForm[field]??""} onChange={e=>setEditRoomForm({...editRoomForm,[field]:e.target.value})} min={["capacity","inventoryCount"].includes(field)?1:undefined} step={field==="basePrice"?"0.01":undefined} />
-                                </label>
-                            ))}
-                        </div>
-                        <div style={{display:"flex",gap:10,marginTop:20}}>
-                            <button className="btn btn-teal" disabled={blockingRoomSave||updateRoom.isPending} onClick={submitEditRoomType}>{blockingRoomSave||updateRoom.isPending?"Saving…":"Save changes"}</button>
-                            <button className="btn btn-outline" onClick={()=>setEditingRoom(null)}>Cancel</button>
+                        <div className="modal-footer">
+                            <button type="button" className="btn btn-teal" disabled={blockingRoomSave||updateRoom.isPending} onClick={submitEditRoomType}>{blockingRoomSave||updateRoom.isPending?"Saving…":"Save changes"}</button>
+                            <button type="button" className="btn btn-outline" onClick={()=>setEditingRoom(null)}>Cancel</button>
                         </div>
                     </div>
                 </div>

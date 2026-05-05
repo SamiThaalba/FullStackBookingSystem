@@ -19,6 +19,9 @@ public class RoomTypeRequest {
 
     private String description;
 
+    @Schema(description = "Optional public image URL for this room type")
+    private String imageUrl;
+
     @NotNull
     @Min(1)
     @Schema(description = "Maximum guests")

@@ -144,7 +144,6 @@ export default function Profile() {
               </button>
             ) : null}
           </div>
-          <p className="profile-hint muted">{t("profile.photoHint")}</p>
 
           {message ? <p className="profile-alert profile-alert--ok">{message}</p> : null}
           {error ? <p className="profile-alert profile-alert--err">{error}</p> : null}

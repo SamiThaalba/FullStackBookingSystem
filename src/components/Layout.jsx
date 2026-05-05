@@ -1,7 +1,7 @@
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../auth/AuthContext";
 import { bookingApi } from "../api/bookingApi";
 import I18nHtmlAttributes from "./I18nHtmlAttributes";
@@ -10,39 +10,59 @@ import NotificationBellIcon from "./NotificationBellIcon";
 import NotificationSlideIn from "./NotificationSlideIn";
 import ThemeToggle from "./ThemeToggle";
 import BookingAssistant from "./BookingAssistant";
+import { useNotificationRealtime } from "../hooks/useNotificationRealtime";
+
+/** Dev StrictMode remounts reset hooks; avoid duplicate ui-language PATCH in quick succession. */
+let lastUiLanguagePatch = { signature: "", at: 0 };
 
 export default function Layout() {
   const { t, i18n } = useTranslation();
   const auth = useAuth();
+  const queryClient = useQueryClient();
   const navigate = useNavigate();
   const location = useLocation();
 
   const notificationsNavEnabled =
     auth.isAuthenticated && auth.hasPermission("notification:view");
 
-  const unreadNotificationsQuery = useQuery({
-    queryKey: ["notifications-unread-count"],
-    queryFn: bookingApi.unreadNotificationCount,
-    enabled: notificationsNavEnabled,
-    refetchInterval: 8_000,
-    refetchIntervalInBackground: true,
-    refetchOnWindowFocus: true,
-    staleTime: 4_000,
-  });
+  // WebSocket: connect while logged in so server pushes reach the client (email still works when the app is closed).
+  useNotificationRealtime(auth.isAuthenticated);
 
-  const unreadCount = Number(unreadNotificationsQuery.data?.unreadCount ?? 0) || 0;
+  // One-time inbox load for users who see the bell — same cache key as /notifications; WS keeps it live.
+  const notificationsQuery = useQuery({
+    queryKey: ["notifications"],
+    queryFn: bookingApi.notifications,
+    enabled: notificationsNavEnabled,
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  });
+  const unreadCount = (notificationsQuery.data || []).filter((n) => !n.read).length;
   const showUnreadDot = notificationsNavEnabled && unreadCount > 0;
 
   useEffect(() => {
     if (!auth.isAuthenticated || !i18n.isInitialized) return;
     const code =
-      typeof i18n.language === "string"
-        ? i18n.language.split("-")[0]
-        : "en";
-    bookingApi.syncUiLanguage(code || "en").catch(() => { });
-  }, [auth.isAuthenticated, i18n.isInitialized, i18n.language]);
+      (typeof i18n.language === "string" ? i18n.language.split("-")[0] : "en") || "en";
+    const uid = auth.user?.id ?? "?";
+    const signature = `${uid}:${code}`;
+    const now = Date.now();
+    if (
+      lastUiLanguagePatch.signature === signature &&
+      now - lastUiLanguagePatch.at < 2500
+    ) {
+      return;
+    }
+    lastUiLanguagePatch = { signature, at: now };
+    bookingApi.syncUiLanguage(code).catch(() => {
+      if (lastUiLanguagePatch.signature === signature) {
+        lastUiLanguagePatch = { signature: "", at: 0 };
+      }
+    });
+  }, [auth.isAuthenticated, auth.user?.id, i18n.isInitialized, i18n.language]);
 
   async function handleLogout() {
+    queryClient.setQueryData(["notifications"], []);
     await auth.signOut();
     navigate("/");
   }
@@ -50,7 +70,7 @@ export default function Layout() {
   return (
     <div className="app-shell">
       <I18nHtmlAttributes />
-      <NotificationSlideIn enabled={notificationsNavEnabled} />
+      <NotificationSlideIn enabled={auth.isAuthenticated} />
       <header className="site-header">
         <nav className="nav container">
           <NavLink to="/" className="brand" aria-label={t("layout.brandAria")}>
