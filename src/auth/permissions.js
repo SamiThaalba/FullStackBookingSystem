@@ -6,8 +6,6 @@ export const MANAGER_WORKSPACE_PERMISSIONS = [
   "room:create",
   "room:update",
   "room:delete",
-  "booking:update",
-  "booking:cancel",
   "analytics:view",
 ];
 

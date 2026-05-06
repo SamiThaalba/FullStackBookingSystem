@@ -701,10 +701,56 @@ select {
   justify-items: start;
 }
 
+.profile-saved-card-stack {
+  width: min(100%, 500px);
+  display: grid;
+  gap: 12px;
+  justify-items: start;
+}
+
+.profile-saved-card-toolbar {
+  width: min(100%, 488px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.profile-saved-card-toolbar span {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.profile-saved-card-stage {
+  position: relative;
+  width: min(100%, 488px);
+  aspect-ratio: 1.45 / 1;
+  isolation: isolate;
+  overflow: visible;
+}
+
 .profile-saved-card {
   width: min(100%, 460px);
   display: grid;
   gap: 10px;
+}
+
+.profile-saved-card--stacked {
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: calc(100% - 28px);
+  max-width: 460px;
+  z-index: var(--stack-z);
+  opacity: var(--stack-opacity);
+  transform: translate(var(--stack-x), var(--stack-y)) scale(var(--stack-scale));
+  transform-origin: top left;
+  pointer-events: none;
+  transition: transform 160ms ease, opacity 160ms ease;
+}
+
+.profile-saved-card--stacked.is-active {
+  pointer-events: auto;
 }
 
 .profile-saved-card__preview {
@@ -765,6 +811,45 @@ select {
 
 .profile-saved-card .profile-payment-method__actions {
   grid-column: auto;
+}
+
+.profile-saved-card-stack__actions {
+  justify-content: flex-start;
+}
+
+.hotel-payment-card-stack {
+  width: min(100%, 500px);
+  margin: 0 auto;
+}
+
+.hotel-payment-card-stage {
+  margin: 0 auto;
+}
+
+.hotel-payment-card-stage.is-muted {
+  filter: saturate(0.45) brightness(0.92);
+}
+
+.hotel-payment-saved-card-button {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.hotel-payment-saved-card-button:disabled {
+  cursor: not-allowed;
+}
+
+.hotel-payment-saved-card-button .profile-saved-card__preview {
+  border: 1px solid rgba(125, 211, 252, 0.42);
+}
+
+.hotel-payment-saved-card-button.is-active .profile-saved-card__preview {
+  box-shadow: 0 0 0 2px rgba(125, 211, 252, 0.92), 0 16px 34px rgba(8, 25, 52, 0.42);
 }
 
 .profile-payment-method,
@@ -1043,7 +1128,7 @@ select {
 
 .search-panel-bar {
   position: relative;
-  border: 3px solid var(--gold);
+  border: 3px solid var(--purple);
   border-radius: 18px;
   background: var(--surface);
   box-shadow: var(--shadow);
@@ -2438,27 +2523,29 @@ button.hotel-map-label {
 
 .hotel-list {
   display: grid;
-  gap: 18px;
-  max-width: 760px;
+  gap: 22px;
+  max-width: 940px;
   margin: 0 auto;
 }
 
 .hotel-card {
   display: grid;
-  grid-template-columns: 190px minmax(0, 1fr) auto;
-  gap: 18px;
+  grid-template-columns: minmax(260px, 340px) minmax(0, 1fr) auto;
+  gap: 22px;
   align-items: center;
-  min-height: 150px;
-  padding: 14px;
+  min-height: 230px;
+  padding: 16px;
   border: 1px solid var(--line);
   background: var(--surface);
+  border-radius: 8px;
+  box-shadow: 0 16px 36px rgba(31, 18, 47, 0.08);
 }
 
 .hotel-image,
 .gallery-card {
-  min-height: 125px;
-  aspect-ratio: 4 / 3;
-  border-radius: 4px;
+  min-height: 205px;
+  aspect-ratio: 16 / 11;
+  border-radius: 8px;
   display: grid;
   place-items: center;
   color: #fff;
@@ -2474,6 +2561,11 @@ button.hotel-map-label {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  transition: transform 180ms ease;
+}
+
+.hotel-card:hover .hotel-image img {
+  transform: scale(1.035);
 }
 
 .hotel-summary h3,
@@ -3286,6 +3378,17 @@ button.notif-row--btn:disabled {
 .assistant-stepper__top span {
   font-weight: 700;
   color: color-mix(in srgb, var(--teal) 72%, var(--ink));
+}
+
+.assistant-stepper__top span,
+.assistant-stepper__top small {
+  white-space: nowrap;
+}
+
+.assistant-stepper__top small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .assistant-stepper__bar {
@@ -4608,6 +4711,27 @@ button.notif-row--btn:disabled {
   border-color: color-mix(in srgb, var(--teal) 45%, var(--line));
 }
 .assistant-head__newChat:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.assistant-stepper {
+  min-width: 0;
+}
+
+.assistant-stepper__top {
+  gap: 8px;
+  min-width: 0;
+}
+
+.assistant-stepper__top span {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.assistant-stepper__top small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .assistant-botAvatar {
   width: 24px;

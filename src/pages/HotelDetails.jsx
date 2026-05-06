@@ -11,7 +11,7 @@ import { nightsBetween, todayIso, tomorrowIso } from "../utils/dates";
 import { compactAddress, money } from "../utils/format";
 import { hasValidHotelLatLng } from "../utils/geo";
 import { useHotelWishlistToggle } from "../hooks/useHotelWishlistToggle";
-import { FaHeart, FaRegHeart } from "react-icons/fa";
+import { FaExchangeAlt, FaHeart, FaRegHeart } from "react-icons/fa";
 import RoomWishlistButton from "../components/RoomWishlistButton";
 import {
   PAYMENT_METHODS,
@@ -250,6 +250,19 @@ export default function HotelDetails() {
     setSavedCards(loadSavedCards());
   }, []);
 
+  useEffect(() => {
+    setActiveSavedCardIndex((current) => {
+      if (!savedCards.length) return null;
+      if (current == null) return current;
+      return Math.min(current, savedCards.length - 1);
+    });
+  }, [savedCards.length]);
+
+  useEffect(() => {
+    if (!paymentOpen || !savedCards.length || activeSavedCardIndex != null) return;
+    applySavedCard(savedCards[0], 0);
+  }, [paymentOpen, savedCards, activeSavedCardIndex]);
+
   function saveCardIfNeeded() {
     if (paymentMethod !== PAYMENT_METHODS.CARD || !saveCardForNextTime) return;
     if (!paymentDraft.cardNumber || !paymentDraft.fullName || !paymentDraft.expiry) return;
@@ -265,7 +278,7 @@ export default function HotelDetails() {
         card.expiry === normalized.expiry,
     );
     if (alreadyExists) return;
-    const next = [normalized, ...savedCards].slice(0, 4);
+    const next = [normalized, ...savedCards];
     setSavedCards(saveSavedCards(next));
   }
 
@@ -279,6 +292,24 @@ export default function HotelDetails() {
     });
     setPaymentMethod(PAYMENT_METHODS.CARD);
   }
+
+  function swapPaymentCard() {
+    if (savedCards.length < 2) return;
+    const currentIndex = activeSavedCardIndex ?? 0;
+    const nextIndex = (currentIndex + 1) % savedCards.length;
+    applySavedCard(savedCards[nextIndex], nextIndex);
+  }
+
+  const checkoutActiveSavedCardIndex = savedCards.length
+    ? Math.min(activeSavedCardIndex ?? 0, savedCards.length - 1)
+    : 0;
+  const checkoutStackedCards = savedCards
+    .map((card, index) => ({
+      card,
+      index,
+      stackIndex: (index - checkoutActiveSavedCardIndex + savedCards.length) % savedCards.length,
+    }))
+    .filter(({ stackIndex }) => stackIndex < Math.min(savedCards.length, 3));
 
   if (hotelQuery.isLoading) {
     return <div className="container empty-state">{t("hotelDetail.loadingHotel")}</div>;
@@ -542,87 +573,68 @@ export default function HotelDetails() {
                   </label>
 
                   {savedCards.length > 0 ? (
-                    <div>
-                      <p style={{ margin: "0 0 8px", fontWeight: 700 }}>Saved cards</p>
-                      <div
-                        style={{
-                          position: "relative",
-                          margin: "0 auto",
-                          width: "min(100%, 420px)",
-                          height: `${265 + Math.max(0, savedCards.length - 1) * 14}px`,
-                        }}
-                      >
-                        {savedCards.map((card, index) => {
-                          const isSelected = activeSavedCardIndex === index;
-                          const isCashMode = paymentMethod === PAYMENT_METHODS.CASH;
-                          const depth = Math.max(0, savedCards.length - 1 - index);
-                          return (
-                          <button
-                            key={`${card.cardNumber}-${card.expiry}-${index}`}
-                            type="button"
-                            disabled={pendingBook}
-                            style={{
-                              position: "absolute",
-                              left: 0,
-                              right: 0,
-                              margin: "0 auto",
-                              top: `${depth * 16}px`,
-                              zIndex: isSelected ? savedCards.length + 10 : savedCards.length - index,
-                              textAlign: "left",
-                              border: isSelected ? "2px solid #7dd3fc" : "1px solid #2b5da8",
-                              borderRadius: "18px",
-                              padding: "14px 16px",
-                              color: "#eef6ff",
-                              background: depth % 2 === 0
-                                ? "linear-gradient(155deg, #123c80 0%, #1e66c5 58%, #0b2f63 100%)"
-                                : "linear-gradient(155deg, #0f3572 0%, #2a77d1 55%, #0a2a59 100%)",
-                              boxShadow: isSelected
-                                ? "0 0 0 3px rgba(125,211,252,0.22), 0 14px 30px rgba(8,25,52,0.5)"
-                                : "0 10px 24px rgba(8,25,52,0.42)",
-                              cursor: pendingBook ? "not-allowed" : "pointer",
-                              transition: "transform 0.12s ease, box-shadow 0.2s ease, border-color 0.2s ease, filter 0.2s ease, opacity 0.2s ease",
-                              width: "min(100%, 420px)",
-                              aspectRatio: "1.586 / 1",
-                              display: "flex",
-                              flexDirection: "column",
-                              justifyContent: "space-between",
-                              transform: isSelected ? "translateY(-4px)" : `translateY(${Math.min(6, depth * 2)}px)`,
-                              opacity: isCashMode ? (isSelected ? 0.78 : 0.62) : 1,
-                              filter: isCashMode ? "saturate(0.4) brightness(0.9)" : "none",
-                            }}
-                            onClick={() => applySavedCard(card, index)}
-                          >
-                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
-                              <span
-                                style={{
-                                  width: "34px",
-                                  height: "24px",
-                                  borderRadius: "6px",
-                                  background: "linear-gradient(145deg, #d7b96d 0%, #f3dea0 40%, #caa44f 100%)",
-                                  boxShadow: "inset 0 0 0 1px rgba(84,56,10,0.28)",
-                                  display: "inline-block",
-                                }}
-                                aria-hidden
-                              />
-                              <span style={{ fontSize: "1.03rem", fontWeight: 900, fontStyle: "italic", letterSpacing: "0.04em" }}>VISA</span>
-                            </div>
-                            <div style={{ fontSize: "1.2rem", fontWeight: 800, letterSpacing: "0.14em", marginBottom: "10px" }}>
-                              {maskCardNumber(card.cardNumber)}
-                            </div>
-                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: "8px" }}>
-                              <div>
-                                <div style={{ fontSize: "0.66rem", opacity: 0.8, textTransform: "uppercase" }}>Card holder</div>
-                                <div style={{ fontSize: "0.9rem", fontWeight: 700 }}>{card.fullName || "Guest"}</div>
-                              </div>
-                              <div style={{ textAlign: "right" }}>
-                                <div style={{ fontSize: "0.66rem", opacity: 0.8, textTransform: "uppercase" }}>Expires</div>
-                                <div style={{ fontSize: "0.9rem", fontWeight: 700 }}>{card.expiry}</div>
-                              </div>
-                            </div>
-                            <div style={{ fontSize: "0.62rem", opacity: 0.8, marginTop: "8px", letterSpacing: "0.05em" }}>
-                              {getCardBrand(card.cardNumber)} DEBIT
-                            </div>
+                    <div className="profile-saved-card-stack hotel-payment-card-stack">
+                      <div className="profile-saved-card-toolbar">
+                        <span>
+                          Saved card {checkoutActiveSavedCardIndex + 1} of {savedCards.length}
+                        </span>
+                        {savedCards.length > 1 ? (
+                          <button type="button" className="btn btn-small btn-outline" disabled={pendingBook} onClick={swapPaymentCard}>
+                            <FaExchangeAlt aria-hidden />
+                            Swap card
                           </button>
+                        ) : null}
+                      </div>
+
+                      <div
+                        className={`profile-saved-card-stage hotel-payment-card-stage${
+                          paymentMethod === PAYMENT_METHODS.CASH ? " is-muted" : ""
+                        }`}
+                        aria-live="polite"
+                      >
+                        {checkoutStackedCards.map(({ card, index, stackIndex }) => {
+                          const brand = getCardBrand(card.cardNumber);
+                          const stackX = stackIndex * 10;
+                          const stackY = 34 - stackIndex * 14;
+                          return (
+                            <button
+                              key={`${card.cardNumber}-${card.expiry}-${index}`}
+                              type="button"
+                              className={`profile-saved-card profile-saved-card--stacked hotel-payment-saved-card-button${
+                                stackIndex === 0 ? " is-active" : ""
+                              }`}
+                              disabled={pendingBook}
+                              aria-hidden={stackIndex !== 0}
+                              aria-label={stackIndex === 0 ? `Use saved card ${checkoutActiveSavedCardIndex + 1} of ${savedCards.length}` : undefined}
+                              tabIndex={stackIndex === 0 ? 0 : -1}
+                              style={{
+                                "--stack-x": `${stackX}px`,
+                                "--stack-y": `${stackY}px`,
+                                "--stack-scale": `${1 - stackIndex * 0.025}`,
+                                "--stack-opacity": `${1 - stackIndex * 0.14}`,
+                                "--stack-z": `${10 - stackIndex}`,
+                              }}
+                              onClick={() => applySavedCard(card, index)}
+                            >
+                              <div className="profile-saved-card__preview">
+                                <div className="profile-saved-card__top">
+                                  <span className="profile-saved-card__chip" aria-hidden />
+                                  <strong>{brand}</strong>
+                                </div>
+                                <div className="profile-saved-card__number">{maskCardNumber(card.cardNumber)}</div>
+                                <div className="profile-saved-card__meta">
+                                  <span>
+                                    <small>Card holder</small>
+                                    {card.fullName || "Guest"}
+                                  </span>
+                                  <span>
+                                    <small>Expires</small>
+                                    {card.expiry || "--"}
+                                  </span>
+                                </div>
+                                <small className="profile-saved-card__type">{brand} debit</small>
+                              </div>
+                            </button>
                           );
                         })}
                       </div>
