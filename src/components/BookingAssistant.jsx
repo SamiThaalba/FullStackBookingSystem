@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { bookingApi } from "../api/bookingApi";
 import { useAuth } from "../auth/AuthContext";
 import { useBookingUi } from "../context/BookingUiContext";
@@ -56,9 +57,10 @@ function loadMemory() {
     return {
       context: parsed?.context || {},
       history: Array.isArray(parsed?.history) ? parsed.history : [],
+      ui: parsed?.ui || {},
     };
   } catch {
-    return { context: {}, history: [] };
+    return { context: {}, history: [], ui: {} };
   }
 }
 
@@ -305,41 +307,66 @@ function getStrictCurrentStep(context, confirmDraft) {
   return confirmDraft ? 7 : 7;
 }
 
-function getFlowStep(context, confirmDraft) {
+function getFlowStep(context, confirmDraft, lang = "en") {
   const hasHotel = Number(context?.selectedHotelId || 0) > 0;
   const hasCity = Boolean(context?.city || context?.anyCity);
   const hasDates = Boolean(context?.checkIn && context?.checkOut);
   const hasGuests = Number(context?.guests || 0) > 0;
   const hasRoom = Number(context?.selectedRoomTypeId || 0) > 0;
 
-  if (!hasCity && !hasHotel) return { number: 1, label: "Choose destination" };
-  if (!hasDates) return { number: 2, label: "Choose dates" };
-  if (!hasGuests) return { number: 3, label: "Choose guests" };
-  if (!hasHotel) return { number: 4, label: "Choose hotel" };
-  if (!hasRoom) return { number: 5, label: "Choose room type" };
-  return confirmDraft ? { number: 6, label: "Confirm booking" } : { number: 6, label: "Confirm booking" };
+  const labels =
+    lang === "ar"
+      ? {
+          dest: "اختيار الوجهة",
+          dates: "اختيار التواريخ",
+          guests: "اختيار عدد الضيوف",
+          hotel: "اختيار الفندق",
+          room: "اختيار نوع الغرفة",
+          confirm: "تأكيد الحجز",
+        }
+      : {
+          dest: "Choose destination",
+          dates: "Choose dates",
+          guests: "Choose guests",
+          hotel: "Choose hotel",
+          room: "Choose room type",
+          confirm: "Confirm booking",
+        };
+
+  if (!hasCity && !hasHotel) return { number: 1, label: labels.dest };
+  if (!hasDates) return { number: 2, label: labels.dates };
+  if (!hasGuests) return { number: 3, label: labels.guests };
+  if (!hasHotel) return { number: 4, label: labels.hotel };
+  if (!hasRoom) return { number: 5, label: labels.room };
+  return confirmDraft ? { number: 6, label: labels.confirm } : { number: 6, label: labels.confirm };
 }
 
-function getGuideQuestion(context, confirmDraft) {
+function getGuideQuestion(context, confirmDraft, lang = "en") {
   if (!context?.city && !context?.anyCity && !Number(context?.selectedHotelId || 0)) {
-    return "Great — step 1: which city do you want to stay in? (Or say: any city)";
+    return lang === "ar"
+      ? "تمام — الخطوة 1: في أي مدينة تريد الإقامة؟ (أو قل: أي مدينة)"
+      : "Great — step 1: which city do you want to stay in? (Or say: any city)";
   }
   if (!context?.checkIn || !context?.checkOut) {
-    return "Step 2: check-in and check-out dates — you can say e.g. \"today to tomorrow\", or type YYYY-MM-DD.";
+    return lang === "ar"
+      ? "الخطوة 2: تواريخ الدخول والخروج — يمكنك قول: \"today to Sunday\" أو كتابة YYYY-MM-DD."
+      : "Step 2: check-in and check-out dates — you can say e.g. \"today to tomorrow\", or type YYYY-MM-DD.";
   }
   if (!Number(context?.guests || 0)) {
-    return "Step 3: how many guests will stay?";
+    return lang === "ar" ? "الخطوة 3: كم عدد الضيوف؟" : "Step 3: how many guests will stay?";
   }
   if (!Number(context?.selectedHotelId || 0)) {
-    return "Step 4: which hotel would you like from the options below?";
+    return lang === "ar" ? "الخطوة 4: اختر الفندق من الخيارات في الأسفل." : "Step 4: which hotel would you like from the options below?";
   }
   if (!Number(context?.selectedRoomTypeId || 0)) {
-    return "Step 5: which room type would you like for this hotel?";
+    return lang === "ar" ? "الخطوة 5: ما نوع الغرفة الذي تريده؟" : "Step 5: which room type would you like for this hotel?";
   }
   if (confirmDraft) {
-    return "Step 6: I will open the payment form so you can choose your payment method and complete booking.";
+    return lang === "ar"
+      ? "الخطوة 6: سأفتح صفحة الدفع لتختار طريقة الدفع وتكمل الحجز."
+      : "Step 6: I will open the payment form so you can choose your payment method and complete booking.";
   }
-  return "Everything is ready. Press Confirm booking when you are ready.";
+  return lang === "ar" ? "كل شيء جاهز. اضغط تأكيد الحجز عندما تكون جاهزاً." : "Everything is ready. Press Confirm booking when you are ready.";
 }
 
 function humanizeError(err) {
@@ -404,6 +431,9 @@ function cleanHotelNameIntent(value) {
     /^(?:i\s*(?:want|wanna)\s*(?:to\s*)?(?:book|reserve)\s*(?:me\s*)?(?:in|at)\s+|(?:book|reserve)\s*(?:me\s*)?(?:in|at)\s+|(?:in|at)\s+)/i,
     "",
   );
+  // Handle: "hotel called postman", "hotel named postman", "hotel postman"
+  v = v.replace(/^(?:the\s+)?hotel\s+(?:called|named)\s+/i, "");
+  v = v.replace(/^(?:the\s+)?hotel\s+/i, "");
   v = v.replace(/^(?:the\s+)?hotel\s+name\s+/i, "");
   v = v.replace(/^name\s+/i, "");
   v = v.replace(/^(?:called|named)\s+/i, "");
@@ -439,9 +469,56 @@ function resolveCheckInOutFromUserText(text, todayAnchorFn = todayIso) {
     }
     return { checkIn, checkOut };
   }
-  const natural = parseNaturalDateRange(text, todayAnchorFn);
+  const natural = parseNaturalDateRangeEnhanced(text, todayAnchorFn);
   if (natural?.checkIn && natural?.checkOut) return natural;
   return null;
+}
+
+function parseNaturalDateRangeEnhanced(text, todayAnchorFn = todayIso) {
+  const base = parseNaturalDateRange(text, todayAnchorFn);
+  if (base?.checkIn && base?.checkOut) return base;
+
+  // Add support for common weekday ranges: "today to sunday", "tomorrow until friday", etc.
+  const v = String(text || "").toLowerCase();
+  const anchorIso = todayAnchorFn();
+  const anchor = new Date(`${anchorIso}T00:00:00`);
+  const dayIndex = {
+    sunday: 0,
+    monday: 1,
+    tuesday: 2,
+    wednesday: 3,
+    thursday: 4,
+    friday: 5,
+    saturday: 6,
+  };
+
+  function nextWeekday(targetIdx, fromDate) {
+    const d = new Date(fromDate);
+    const fromIdx = d.getDay();
+    let delta = (targetIdx - fromIdx + 7) % 7;
+    if (delta === 0) delta = 7; // interpret as next occurrence
+    d.setDate(d.getDate() + delta);
+    return d;
+  }
+
+  const weekdayWords = Object.keys(dayIndex);
+  const found = weekdayWords.find((w) => new RegExp(`\\b${w}\\b`, "i").test(v));
+  if (!found) return null;
+
+  const hasRange = /\b(to|until|till|through|thru)\b/i.test(v);
+  if (!hasRange) return null;
+
+  const endIdx = dayIndex[found];
+  const hasTomorrowStart = /\b(tomorrow)\b/i.test(v);
+  // "today"/implicit today
+  const start = new Date(anchor);
+  if (hasTomorrowStart) start.setDate(start.getDate() + 1);
+
+  const end = nextWeekday(endIdx, start);
+  const checkIn = start.toISOString().slice(0, 10);
+  const checkOut = end.toISOString().slice(0, 10);
+  if (new Date(checkOut) <= new Date(checkIn)) return null;
+  return { checkIn, checkOut };
 }
 
 function findBestRoomNameMatch(rooms, requestedName) {
@@ -657,6 +734,7 @@ function TypingIndicator() {
 }
 
 export default function BookingAssistant({ embedded = false }) {
+  const { i18n } = useTranslation();
   const auth = useAuth();
   const { updateBookingUi } = useBookingUi();
   const navigate = useNavigate();
@@ -686,7 +764,13 @@ export default function BookingAssistant({ embedded = false }) {
   const [selectedRoomOptionId, setSelectedRoomOptionId] = useState(null);
   const [pickDialog, setPickDialog] = useState(null); // { type:"hotel"|"room", title:string, items:[] }
   const [assistantPickerDismissed, setAssistantPickerDismissed] = useState(false);
-  const [guideEnabled, setGuideEnabled] = useState(false);
+  const [guideEnabled, setGuideEnabled] = useState(Boolean(initialMemory?.ui?.guideEnabled) || embedded);
+  const systemLang =
+    (typeof i18n?.language === "string" ? i18n.language : document?.documentElement?.lang || "en")
+      .split("-")[0]
+      .toLowerCase() === "ar"
+      ? "ar"
+      : "en";
   const wasAuthenticatedRef = useRef(Boolean(auth.isAuthenticated));
   const scrollerRef = useRef(null);
   const inputRef = useRef(null);
@@ -713,6 +797,7 @@ export default function BookingAssistant({ embedded = false }) {
       if (!flag) return;
       sessionStorage.removeItem(ASSISTANT_AUTO_OPEN_KEY);
       setOpen(true);
+      setGuideEnabled(true);
     } catch {
       // ignore storage issues
     }
@@ -897,7 +982,6 @@ export default function BookingAssistant({ embedded = false }) {
       open &&
       !loading &&
       !confirmDraft &&
-      hotelOptions.length > 0 &&
       !Number(context?.selectedHotelId || 0) &&
       location.pathname === "/hotels";
     if (!shouldSyncWithHotelsPage) return;
@@ -924,7 +1008,7 @@ export default function BookingAssistant({ embedded = false }) {
           size,
         });
         const list = resp?.content || [];
-        if (cancelled || !Array.isArray(list) || list.length === 0) return;
+        if (cancelled || !Array.isArray(list)) return;
         setHotelOptions(list.map(toHotelOption).filter((hotel) => hotel.id > 0 && hotel.name));
       } catch {
         // Keep existing options if page-sync request fails.
@@ -952,7 +1036,7 @@ export default function BookingAssistant({ embedded = false }) {
   function pushTurn(role, content, nextChat = chat, contextOverride = context) {
     const updated = [...nextChat, { role, content }];
     setChat(updated);
-    saveMemory({ context: contextOverride || {}, history: updated });
+    saveMemory({ context: contextOverride || {}, history: updated, ui: { guideEnabled } });
     queueMicrotask(() => {
       scrollerRef.current?.scrollTo({ top: scrollerRef.current.scrollHeight, behavior: "smooth" });
     });
@@ -1100,7 +1184,7 @@ export default function BookingAssistant({ embedded = false }) {
       setGuideEnabled(true);
       setMessage("");
       const withUser = pushTurn("user", text);
-      const question = getGuideQuestion(context, confirmDraft);
+      const question = getGuideQuestion(context, confirmDraft, systemLang);
       if (question) pushTurn("assistant", question, withUser, context);
       return;
     }
@@ -1237,7 +1321,9 @@ export default function BookingAssistant({ embedded = false }) {
           if (!resolvedDates) {
             pushTurn(
               "assistant",
-              "Please give both check-in and check-out — for example \"today to tomorrow\", or two dates like 2026-05-10 to 2026-05-13.",
+              systemLang === "ar"
+                ? "رجاءً اكتب تاريخي الدخول والخروج — مثال: \"today to Sunday\" أو تاريخين مثل 2026-05-10 إلى 2026-05-13."
+                : "Please give both check-in and check-out — for example \"today to tomorrow\", or two dates like 2026-05-10 to 2026-05-13.",
               withUser,
             );
             return;
@@ -1709,7 +1795,7 @@ export default function BookingAssistant({ embedded = false }) {
         }
       }
 
-      const parsedNatural = parseNaturalDateRange(normalizedText, todayIso);
+      const parsedNatural = parseNaturalDateRangeEnhanced(normalizedText, todayIso);
       const contextForChatRequest =
         parsedNatural && (!context.checkIn || !context.checkOut)
           ? { ...context, checkIn: parsedNatural.checkIn, checkOut: parsedNatural.checkOut }
@@ -1717,7 +1803,7 @@ export default function BookingAssistant({ embedded = false }) {
 
       const response = await bookingApi.assistantChat({
         message: normalizedText,
-        context: { ...contextForChatRequest, _today: todayIso() },
+        context: { ...contextForChatRequest, _today: todayIso(), _lang: systemLang },
         history: withUser,
       });
 
@@ -2209,7 +2295,7 @@ export default function BookingAssistant({ embedded = false }) {
     setPickDialog(null);
     setAssistantPickerDismissed(false);
     setGuideEnabled(false);
-    saveMemory({ context: {}, history: [] });
+    saveMemory({ context: {}, history: [], ui: { guideEnabled: false } });
     if (!embedded) resetAssistantToBottomRight(posRef, setPos);
   }
 
@@ -2312,7 +2398,7 @@ export default function BookingAssistant({ embedded = false }) {
   function startGuidedFlow() {
     setGuideEnabled(true);
     if (loading) return;
-    const question = getGuideQuestion(context, confirmDraft);
+    const question = getGuideQuestion(context, confirmDraft, systemLang);
     if (!question) return;
     const last = chat[chat.length - 1];
     if (last?.role === "assistant" && String(last?.content || "").trim() === question) return;
@@ -2348,7 +2434,13 @@ export default function BookingAssistant({ embedded = false }) {
   }, [assistantPickerModalOpen]);
 
   const hasUnread = !open && chat.length > 0 && chat[chat.length - 1]?.role === "assistant";
-  const flowStep = getFlowStep(context, confirmDraft);
+  const flowStep = getFlowStep(context, confirmDraft, systemLang);
+  const showStepper = open && !confirmDraft && (guideEnabled || chat.length > 0 || Object.keys(context || {}).length > 0);
+  const pickerStep =
+    !confirmDraft && flowStep?.number === 4 && hotelOptions.length > 0
+      ? "hotel"
+      : (!confirmDraft && flowStep?.number === 5 && roomOptions.length > 0 ? "room" : null);
+  const dir = systemLang === "ar" ? "rtl" : "ltr";
 
   return (
     <div
@@ -2401,7 +2493,7 @@ export default function BookingAssistant({ embedded = false }) {
       )}
 
       {open && (
-        <section className={`assistant-panel ${embedded ? "assistant-panel--embedded" : ""}`}>
+        <section className={`assistant-panel ${embedded ? "assistant-panel--embedded" : ""}`} dir={dir}>
           {/* Header */}
           <div
             className="assistant-head"
@@ -2414,16 +2506,22 @@ export default function BookingAssistant({ embedded = false }) {
                 <img src="/ai_assistant_logo.png" alt="" />
               </div>
               <div>
-                <strong>{embedded ? "AI Travel Assistant" : "AI Booking Concierge"}</strong>
+                <strong>
+                  {systemLang === "ar"
+                    ? (embedded ? "مساعد السفر بالذكاء الاصطناعي" : "مساعد الحجز بالذكاء الاصطناعي")
+                    : (embedded ? "AI Travel Assistant" : "AI Booking Concierge")}
+                </strong>
                 <span className="muted">
                   {embedded
-                    ? "Ask for city, dates, guests, or a specific hotel name. I will guide each step clearly."
+                    ? (systemLang === "ar"
+                        ? "اسأل عن المدينة أو التواريخ أو عدد الضيوف أو اسم فندق محدد. سأرشدك خطوة بخطوة."
+                        : "Ask for city, dates, guests, or a specific hotel name. I will guide each step clearly.")
                     : bookingContextHint}
                 </span>
-                {guideEnabled ? (
+                {showStepper ? (
                   <div className="assistant-stepper" aria-label="Booking progress">
                     <div className="assistant-stepper__top">
-                      <span>{`Step ${flowStep.number} of 6`}</span>
+                      <span>{systemLang === "ar" ? `الخطوة ${flowStep.number} من 6` : `Step ${flowStep.number} of 6`}</span>
                       <small>{flowStep.label}</small>
                     </div>
                     <div className="assistant-stepper__bar" role="presentation">
@@ -2433,7 +2531,7 @@ export default function BookingAssistant({ embedded = false }) {
                 ) : null}
               </div>
             </div>
-            <div style={{ display: "flex", gap: 8 }}>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
               {!guideEnabled ? (
                 <button
                   type="button"
@@ -2443,7 +2541,7 @@ export default function BookingAssistant({ embedded = false }) {
                   aria-label="Guide me"
                   title="Guide me"
                 >
-                  Guide me
+                  {systemLang === "ar" ? "ارشدني" : "Guide me"}
                 </button>
               ) : null}
               <button
@@ -2457,7 +2555,7 @@ export default function BookingAssistant({ embedded = false }) {
                 <svg width="12" height="12" viewBox="0 0 14 14" fill="none" aria-hidden>
                   <path d="M7 1v6m0 0v6m0-6H1m6 0h6" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
                 </svg>
-                New Chat
+                {systemLang === "ar" ? "محادثة جديدة" : "New Chat"}
               </button>
             </div>
           </div>
@@ -2491,7 +2589,7 @@ export default function BookingAssistant({ embedded = false }) {
               ref={inputRef}
               value={message}
               onChange={(e) => setMessage(e.target.value)}
-              placeholder="e.g. Book me a hotel in Ramallah for tomorrow"
+              placeholder={systemLang === "ar" ? "مثال: احجز لي فندقاً في رام الله من today إلى Sunday" : "e.g. Book me a hotel in Ramallah for tomorrow"}
               disabled={loading}
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
@@ -2519,15 +2617,29 @@ export default function BookingAssistant({ embedded = false }) {
 
           {/* Confirm / payment */}
           <div className="assistant-confirm">
-            {(hotelOptions.length > 0 || roomOptions.length > 0) && !confirmDraft ? (
+            {pickerStep && !confirmDraft ? (
               <button
                 type="button"
                 className="assistant-pickTrigger"
                 onClick={() => {
-                  if (hotelOptions.length > 0) {
-                    setPickDialog({ type: "hotel", title: `Step 4: Choose your hotel (${hotelOptions.length} options)`, items: hotelOptions });
-                  } else {
-                    setPickDialog({ type: "room", title: `Step 5: Choose your room type (${roomOptions.length} options)`, items: roomOptions });
+                  if (pickerStep === "hotel") {
+                    setPickDialog({
+                      type: "hotel",
+                      title:
+                        systemLang === "ar"
+                          ? `الخطوة 4: اختر الفندق (${hotelOptions.length})`
+                          : `Step 4: Choose your hotel (${hotelOptions.length} options)`,
+                      items: hotelOptions,
+                    });
+                  } else if (pickerStep === "room") {
+                    setPickDialog({
+                      type: "room",
+                      title:
+                        systemLang === "ar"
+                          ? `الخطوة 5: اختر نوع الغرفة (${roomOptions.length})`
+                          : `Step 5: Choose your room type (${roomOptions.length} options)`,
+                      items: roomOptions,
+                    });
                   }
                 }}
                 disabled={loading}
@@ -2535,18 +2647,22 @@ export default function BookingAssistant({ embedded = false }) {
                 <svg width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden>
                   <path d="M10 2a8 8 0 100 16A8 8 0 0010 2zm0 4v4m0 4h.01" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
                 </svg>
-                {hotelOptions.length > 0
-                  ? `${hotelOptions.length} hotel${hotelOptions.length !== 1 ? "s" : ""} available — tap to choose`
-                  : `${roomOptions.length} room type${roomOptions.length !== 1 ? "s" : ""} available — tap to choose`}
+                {pickerStep === "hotel"
+                  ? (systemLang === "ar"
+                      ? `${hotelOptions.length} فندق متاح — اضغط للاختيار`
+                      : `${hotelOptions.length} hotel${hotelOptions.length !== 1 ? "s" : ""} available — tap to choose`)
+                  : (systemLang === "ar"
+                      ? `${roomOptions.length} نوع غرفة متاح — اضغط للاختيار`
+                      : `${roomOptions.length} room type${roomOptions.length !== 1 ? "s" : ""} available — tap to choose`)}
               </button>
             ) : null}
             {confirmDraft ? (
               <>
                 <button type="button" className="btn btn-primary btn-small" onClick={continueToPayment} disabled={loading}>
-                  Continue to payment
+                  {systemLang === "ar" ? "المتابعة للدفع" : "Continue to payment"}
                 </button>
                 <button type="button" className="btn btn-outline btn-small" onClick={() => setConfirmDraft(null)} disabled={loading}>
-                  Cancel
+                  {systemLang === "ar" ? "إلغاء" : "Cancel"}
                 </button>
               </>
             ) : null}
