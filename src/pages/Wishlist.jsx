@@ -1,12 +1,14 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { bookingApi } from "../api/bookingApi";
 import Alert from "../components/Alert";
 import HotelCard from "../components/HotelCard";
 import RoomTypeCard from "../components/RoomTypeCard";
+import { Link } from "react-router-dom";
 
 export default function Wishlist() {
   const [typeFilter, setTypeFilter] = useState("ALL");
+  const queryClient = useQueryClient();
 
   const wishlistQuery = useQuery({
     queryKey: ["wishlist"],
@@ -57,6 +59,34 @@ export default function Wishlist() {
 
   const hotels = hotelsQuery.data || [];
   const roomTypes = roomTypesQuery.data || [];
+
+  const alertRoomTypeIds = useMemo(
+    () => Array.from(new Set((alerts || []).map((a) => Number(a.roomTypeId)).filter(Boolean))),
+    [alerts],
+  );
+
+  const alertRoomTypesQuery = useQuery({
+    queryKey: ["alerts-room-types", alertRoomTypeIds],
+    enabled: alertRoomTypeIds.length > 0,
+    queryFn: async () => Promise.all(alertRoomTypeIds.map((id) => bookingApi.getRoomType(id))),
+  });
+
+  const alertRoomTypes = alertRoomTypesQuery.data || [];
+  const alertRoomTypeById = useMemo(() => {
+    const map = new Map();
+    alertRoomTypes.forEach((rt) => map.set(Number(rt?.id), rt));
+    return map;
+  }, [alertRoomTypes]);
+
+  const activateAlertMutation = useMutation({
+    mutationFn: (id) => bookingApi.activateAlert(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["alerts"] }),
+  });
+
+  const deactivateAlertMutation = useMutation({
+    mutationFn: (id) => bookingApi.deactivateAlert(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["alerts"] }),
+  });
 
   return (
     <section className="container section">
@@ -112,27 +142,68 @@ export default function Wishlist() {
       {alertsQuery.isLoading ? (
         <div className="empty-state">Loading alerts...</div>
       ) : alerts.length ? (
-        <div className="table-card" style={{ marginTop: 18 }}>
-          <table>
-            <thead>
-              <tr>
-                <th>Alert</th>
-                <th>Type</th>
-                <th>Room type</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {alerts.map((alert) => (
-                <tr key={alert.id}>
-                  <td>#{alert.id}</td>
-                  <td>{alert.alertType}</td>
-                  <td>#{alert.roomTypeId}</td>
-                  <td>{alert.active ? "ACTIVE" : "INACTIVE"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="manager-list" style={{ marginTop: 18 }}>
+          {alerts.map((alert) => {
+            const roomType = alertRoomTypeById.get(Number(alert.roomTypeId)) || null;
+            const title = roomType?.name ? roomType.name : `Room type #${alert.roomTypeId}`;
+            const desc = roomType?.description || "Room type";
+            const isActive = Boolean(alert.active);
+            const toggling =
+              (activateAlertMutation.isPending && activateAlertMutation.variables === alert.id) ||
+              (deactivateAlertMutation.isPending && deactivateAlertMutation.variables === alert.id);
+
+            return (
+              <article key={alert.id} className="room-card room-card--hotel-detail">
+                <div className="room-card__media" aria-hidden>
+                  {roomType?.imageUrl ? (
+                    <img src={roomType.imageUrl} alt="" loading="lazy" />
+                  ) : (
+                    <span className="room-card__mediaFallback">Room</span>
+                  )}
+                </div>
+
+                <div className="room-card__content">
+                  <h3 className="room-card__title" title={title}>
+                    {title}
+                  </h3>
+                  <p className="room-card__desc">{desc}</p>
+
+                  <div className="amenity-row" aria-label="Alert details">
+                    <span>Alert #{alert.id}</span>
+                    <span>{String(alert.alertType || "ALERT")}</span>
+                    <span>{isActive ? "ACTIVE" : "INACTIVE"}</span>
+                  </div>
+                </div>
+
+                <aside className="room-card__actions" aria-label={`${title} alert actions`}>
+                  <div className="room-card__actionsTop">
+                    {roomType?.hotelId ? (
+                      <Link className="btn btn-small btn-outline room-card__alertBtn" to={`/hotels/${roomType.hotelId}`}>
+                        View hotel
+                      </Link>
+                    ) : (
+                      <span aria-hidden />
+                    )}
+                  </div>
+
+                  <div className="room-card__priceBlock">
+                    <div className="room-card__priceValue">{isActive ? "On" : "Off"}</div>
+                    <div className="room-card__priceMeta">Alert status</div>
+                  </div>
+
+                  <button
+                    type="button"
+                    className="btn btn-teal room-action-btn room-action-btn--primary"
+                    onClick={() => (isActive ? deactivateAlertMutation.mutate(alert.id) : activateAlertMutation.mutate(alert.id))}
+                    disabled={toggling}
+                    aria-label={isActive ? "Deactivate alert" : "Activate alert"}
+                  >
+                    {toggling ? "Updating..." : isActive ? "Deactivate" : "Activate"}
+                  </button>
+                </aside>
+              </article>
+            );
+          })}
         </div>
       ) : (
         <div className="empty-state">

@@ -271,9 +271,17 @@ export function normalizeAssistantDateInput(text) {
 
 export function extractAssistantGuestsCount(text) {
   const t = String(text || "").toLowerCase();
+  // "3 guests", "3 people", etc.
   const explicit = t.match(/\b(\d{1,2})\s*(?:guests?|people|persons?|travelers?|travellers?|pax)\b/);
   if (explicit) {
     const n = Number(explicit[1]);
+    return Number.isFinite(n) && n > 0 && n <= 20 ? n : null;
+  }
+
+  // "guests 3", "guests: 3", "pax=2", etc.
+  const explicitReversed = t.match(/\b(?:guests?|people|persons?|travelers?|travellers?|pax)\s*[:=]?\s*(\d{1,2})\b/);
+  if (explicitReversed) {
+    const n = Number(explicitReversed[1]);
     return Number.isFinite(n) && n > 0 && n <= 20 ? n : null;
   }
 

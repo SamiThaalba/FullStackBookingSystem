@@ -21,6 +21,8 @@ import { addDaysIso, isIsoOnOrBefore, todayIso } from "../utils/dates";
 const ASSISTANT_MEMORY_KEY = "quickreserve-ai-memory-v2";
 const ASSISTANT_POSITION_KEY = "quickreserve-ai-position-v1";
 const ASSISTANT_AUTO_OPEN_KEY = "quickreserve-ai-auto-open-v1";
+const ASSISTANT_AWAITING_BOOKING_SUCCESS_KEY = "quickreserve-ai-awaiting-booking-success-v1";
+const ASSISTANT_BOOKING_SUCCESS_EVENT = "quickreserve:booking-success";
 const HOTELS_PAGE_SIZE = 6;
 
 function clamp(n, min, max) {
@@ -385,9 +387,11 @@ function getStrictCurrentStep(context, confirmDraft) {
   if (!hasCity) return 2;
   if (!hasDatesGuests) return 3;
   if (!hasHotel) return 4;
-  if (!hasRoom) return 6;
+  if (!hasRoom) return 5;
   return confirmDraft ? 7 : 7;
 }
+
+const GUIDED_FLOW_TOTAL_STEPS = 5;
 
 function getFlowStep(context, confirmDraft, lang = "en") {
   const hasHotel = Number(context?.selectedHotelId || 0) > 0;
@@ -400,27 +404,39 @@ function getFlowStep(context, confirmDraft, lang = "en") {
     lang === "ar"
       ? {
           dest: "اختيار الوجهة",
-          dates: "اختيار التواريخ",
-          guests: "اختيار عدد الضيوف",
+          datesGuests: "التواريخ وعدد الضيوف",
           hotel: "اختيار الفندق",
           room: "اختيار نوع الغرفة",
           confirm: "تأكيد الحجز",
         }
       : {
           dest: "Choose destination",
-          dates: "Choose dates",
-          guests: "Choose guests",
+          datesGuests: "Dates & guests",
           hotel: "Choose hotel",
           room: "Choose room type",
           confirm: "Confirm booking",
         };
 
   if (!hasCity && !hasHotel) return { number: 1, label: labels.dest };
-  if (!hasDates) return { number: 2, label: labels.dates };
-  if (!hasGuests) return { number: 3, label: labels.guests };
-  if (!hasHotel) return { number: 4, label: labels.hotel };
-  if (!hasRoom) return { number: 5, label: labels.room };
-  return confirmDraft ? { number: 6, label: labels.confirm } : { number: 6, label: labels.confirm };
+  if (!hasDates || !hasGuests) return { number: 2, label: labels.datesGuests };
+  if (!hasHotel) return { number: 3, label: labels.hotel };
+  if (!hasRoom) return { number: 4, label: labels.room };
+  return confirmDraft ? { number: 5, label: labels.confirm } : { number: 5, label: labels.confirm };
+}
+
+/** After destination: show date + guest pickers until both dates and guest count are set. */
+function isFlowDatesStep(context) {
+  const hasHotel = Number(context?.selectedHotelId || 0) > 0;
+  const hasCity = Boolean(context?.city || context?.anyCity);
+  const hasDates = Boolean(context?.checkIn && context?.checkOut);
+  const hasGuests = Number(context?.guests || 0) > 0;
+  if (!hasCity && !hasHotel) return false;
+  return !hasDates || !hasGuests;
+}
+
+function createDefaultDatesGuestsDraft() {
+  const checkIn = todayIso();
+  return { checkIn, checkOut: addDaysIso(checkIn, 1), guests: 1 };
 }
 
 function getGuideQuestion(context, confirmDraft, lang = "en") {
@@ -429,24 +445,21 @@ function getGuideQuestion(context, confirmDraft, lang = "en") {
       ? "تمام — الخطوة 1: في أي مدينة تريد الإقامة؟ (أو قل: أي مدينة)"
       : "Great — step 1: which city do you want to stay in? (Or say: any city)";
   }
-  if (!context?.checkIn || !context?.checkOut) {
+  if (!context?.checkIn || !context?.checkOut || !Number(context?.guests || 0)) {
     return lang === "ar"
-      ? "الخطوة 2: تواريخ الدخول والخروج — يمكنك قول: \"today to Sunday\" أو كتابة YYYY-MM-DD."
-      : "Step 2: check-in and check-out dates — you can say e.g. \"today to tomorrow\", or type YYYY-MM-DD.";
-  }
-  if (!Number(context?.guests || 0)) {
-    return lang === "ar" ? "الخطوة 3: كم عدد الضيوف؟" : "Step 3: how many guests will stay?";
+      ? "الخطوة 2: اختر تواريخ الدخول والمغادرة وعدد الضيوف (الحقول أدناه)، أو اكتب التواريخ وعدد الضيوف."
+      : "Step 2: choose check-in, check-out, and guests using the pickers below — or type dates and guest count.";
   }
   if (!Number(context?.selectedHotelId || 0)) {
-    return lang === "ar" ? "الخطوة 4: اختر الفندق من الخيارات في الأسفل." : "Step 4: which hotel would you like from the options below?";
+    return lang === "ar" ? "الخطوة 3: اختر الفندق من الخيارات في الأسفل." : "Step 3: which hotel would you like from the options below?";
   }
   if (!Number(context?.selectedRoomTypeId || 0)) {
-    return lang === "ar" ? "الخطوة 5: ما نوع الغرفة الذي تريده؟" : "Step 5: which room type would you like for this hotel?";
+    return lang === "ar" ? "الخطوة 4: ما نوع الغرفة الذي تريده؟" : "Step 4: which room type would you like for this hotel?";
   }
   if (confirmDraft) {
     return lang === "ar"
-      ? "الخطوة 6: سأفتح صفحة الدفع لتختار طريقة الدفع وتكمل الحجز."
-      : "Step 6: I will open the payment form so you can choose your payment method and complete booking.";
+      ? "الخطوة 5: سأفتح صفحة الدفع لتختار طريقة الدفع وتكمل الحجز."
+      : "Step 5: I will open the payment form so you can choose your payment method and complete booking.";
   }
   return lang === "ar" ? "كل شيء جاهز. اضغط تأكيد الحجز عندما تكون جاهزاً." : "Everything is ready. Press Confirm booking when you are ready.";
 }
@@ -912,6 +925,17 @@ function BookingAssistantInner({ embedded = false }) {
   const [chat, setChat] = useState(() => initialMemory.history);
   const [context, setContext] = useState(() => initialMemory.context);
   const [loading, setLoading] = useState(false);
+  const [datesGuestsDraft, setDatesGuestsDraft] = useState(() => {
+    const mem = initialMemory?.context || {};
+    if (mem.checkIn && mem.checkOut) {
+      return {
+        checkIn: mem.checkIn,
+        checkOut: mem.checkOut,
+        guests: clamp(Number(mem.guests || 1) || 1, 1, 7),
+      };
+    }
+    return createDefaultDatesGuestsDraft();
+  });
   const [confirmDraft, setConfirmDraft] = useState(null);
   const [hotelOptions, setHotelOptions] = useState([]);
   const [roomOptions, setRoomOptions] = useState([]);
@@ -931,8 +955,42 @@ function BookingAssistantInner({ embedded = false }) {
     : "I can search hotels and complete booking steps for you.";
 
   const systemLang = String(i18n?.language || "en").toLowerCase().startsWith("ar") ? "ar" : "en";
+  const showDatesGuestsPicker = isFlowDatesStep(context) && !confirmDraft && !pickDialog;
 
   if (!canUseAssistant) return null;
+
+  useEffect(() => {
+    function onBookingSuccess() {
+      const awaiting = sessionStorage.getItem(ASSISTANT_AWAITING_BOOKING_SUCCESS_KEY) === "1";
+      if (!awaiting) return;
+      sessionStorage.removeItem(ASSISTANT_AWAITING_BOOKING_SUCCESS_KEY);
+
+      pushTurn(
+        "assistant",
+        systemLang === "ar"
+          ? "شكراً للحجز معنا. سأبدأ محادثة جديدة الآن."
+          : "Thanks for booking. I’ll start a new chat now.",
+      );
+
+      window.setTimeout(() => {
+        resetConversation();
+        if (!embedded) setOpen(false);
+      }, 2000);
+    }
+
+    window.addEventListener(ASSISTANT_BOOKING_SUCCESS_EVENT, onBookingSuccess);
+    return () => window.removeEventListener(ASSISTANT_BOOKING_SUCCESS_EVENT, onBookingSuccess);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [embedded, systemLang]);
+
+  useEffect(() => {
+    const checkIn = context?.checkIn || datesGuestsDraft.checkIn || todayIso();
+    const nextCheckOut = context?.checkOut || datesGuestsDraft.checkOut || addDaysIso(checkIn, 1);
+    const safeCheckOut = isIsoOnOrBefore(nextCheckOut, checkIn) ? addDaysIso(checkIn, 1) : nextCheckOut;
+    const guests = clamp(Number(context?.guests || datesGuestsDraft.guests || 1) || 1, 1, 7);
+    setDatesGuestsDraft((prev) => ({ ...prev, checkIn, checkOut: safeCheckOut, guests }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [context?.checkIn, context?.checkOut, context?.guests]);
 
   function getHotelsPageFilters(overrides = {}) {
     const params = new URLSearchParams(location.search || "");
@@ -1497,8 +1555,8 @@ function BookingAssistantInner({ embedded = false }) {
         const hasGuests = Number(context?.guests || 0) > 0;
         const canSearchHotelByName = hasCity && hasDates && hasGuests && !hasHotel;
 
-        // Guest correction: allow "no I mean 2" even if a wrong guest count was already saved.
-        if (!hasHotel && hasDates) {
+        // Guest correction after step 2 is complete (dates + guests already set).
+        if (!hasHotel && hasDates && hasGuests) {
           const correctedGuests = extractGuestsCount(normalizedText);
           const previousGuests = Number(context?.guests || 0);
           const looksLikeCorrection =
@@ -1523,7 +1581,7 @@ function BookingAssistantInner({ embedded = false }) {
             pushTurn(
               "assistant",
               options.length
-                ? `Got it — ${correctedGuests} guest(s). Step 4: choose a hotel from the options below.`
+                ? `Got it — ${correctedGuests} guest(s). Step 3: choose a hotel from the options below.`
                 : `Got it — ${correctedGuests} guest(s). I couldn't find hotels with these filters. Try different dates or another city.`,
               withUser,
               nextContext,
@@ -1544,7 +1602,9 @@ function BookingAssistantInner({ embedded = false }) {
             setRoomOptions([]);
             pushTurn(
               "assistant",
-              `Step 1 saved. City: ${resolved}. Step 2: check-in and check-out (say e.g. "today to tomorrow", or type YYYY-MM-DD).`,
+              systemLang === "ar"
+                ? `تم حفظ الخطوة 1 — المدينة: ${resolved}. الخطوة 2: اختر التواريخ وعدد الضيوف من الحقول أدناه أو اكتبها.`
+                : `Step 1 saved. City: ${resolved}. Step 2: choose check-in, check-out, and guests using the pickers below — or type them.`,
               withUser,
               nextContext,
             );
@@ -1561,7 +1621,7 @@ function BookingAssistantInner({ embedded = false }) {
         if (!hasHotel && extractHotelNameIntent(normalizedText) && !canSearchHotelByName) {
           pushTurn(
             "assistant",
-            "Let’s stay in order: city first, then dates, guest count — then hotel and room.",
+            "Let’s stay in order: city first, then dates and guests, then hotel and room.",
             withUser,
             context,
           );
@@ -1652,61 +1712,104 @@ function BookingAssistantInner({ embedded = false }) {
 
           pushTurn(
             "assistant",
-            `Step 1 saved. ${any ? "Any city is fine." : `City: ${resolved}.`} Step 2: check-in and check-out (say e.g. "today to tomorrow", or type YYYY-MM-DD).`,
+            systemLang === "ar"
+              ? `تم حفظ الخطوة 1. ${any ? "أي مدينة مناسبة." : `المدينة: ${resolved}.`} الخطوة 2: اختر التواريخ وعدد الضيوف من الحقول أدناه أو اكتبها.`
+              : `Step 1 saved. ${any ? "Any city is fine." : `City: ${resolved}.`} Step 2: choose check-in, check-out, and guests using the pickers below — or type them.`,
             withUser,
             nextContext,
           );
           return;
         }
 
-        // Step 2: dates
-        if (!hasDates) {
+        // Step 2: dates + guests (one step; matches date/guest pickers in the panel)
+        if (!hasHotel && hasCity && (!hasDates || !hasGuests)) {
           const resolvedDates = resolveCheckInOutFromUserText(normalizedText, todayIso);
-          if (!resolvedDates) {
+          const guestsFromText = extractGuestsCount(normalizedText);
+
+          let checkIn = context.checkIn;
+          let checkOut = context.checkOut;
+          if (resolvedDates) {
+            let cin = resolvedDates.checkIn;
+            let cout = resolvedDates.checkOut;
+            if (new Date(cout) <= new Date(cin)) {
+              const d = new Date(cin);
+              d.setDate(d.getDate() + 1);
+              cout = d.toISOString().slice(0, 10);
+            }
+            checkIn = cin;
+            checkOut = cout;
+          }
+
+          let guests = Number(context.guests) || 0;
+          if (guestsFromText) guests = guestsFromText;
+
+          const hasD = Boolean(checkIn && checkOut);
+          const hasG = Number(guests) > 0;
+
+          if (resolvedDates && hasD && !hasG) {
+            const partial = { ...context, checkIn, checkOut };
+            setContext(partial);
+            saveMemory({ context: partial, history: withUser });
+            navigateWithContext({ navigate, updateBookingUi, ctx: partial, fallbackGuests: 1 });
+            setHotelOptions([]);
+            setRoomOptions([]);
             pushTurn(
               "assistant",
               systemLang === "ar"
-                ? "رجاءً اكتب تاريخي الدخول والخروج — مثال: \"today to Sunday\" أو تاريخين مثل 2026-05-10 إلى 2026-05-13."
-                : "Please give both check-in and check-out — for example \"today to tomorrow\", or two dates like 2026-05-10 to 2026-05-13.",
+                ? "تم حفظ التواريخ. اختر عدد الضيوف من الشريط أدناه أو اكتب العدد (مثال: 3)."
+                : "Dates saved. Choose the number of guests with the slider below, or say how many (e.g. 3).",
+              withUser,
+              partial,
+            );
+            return;
+          }
+
+          if (guestsFromText && hasG && !hasD) {
+            const partial = { ...context, guests };
+            setContext(partial);
+            saveMemory({ context: partial, history: withUser });
+            navigateWithContext({ navigate, updateBookingUi, ctx: partial, fallbackGuests: guests });
+            setHotelOptions([]);
+            setRoomOptions([]);
+            pushTurn(
+              "assistant",
+              systemLang === "ar"
+                ? "تم حفظ عدد الضيوف. اختر تواريخ الدخول والخروج في الأعلى أو اكتبها."
+                : "Guest count saved. Pick check-in and check-out above, or type your dates.",
+              withUser,
+              partial,
+            );
+            return;
+          }
+
+          if (!hasD) {
+            pushTurn(
+              "assistant",
+              systemLang === "ar"
+                ? "رجاءً حدد تاريخي الدخول والخروج في الحقول أدناه، أو اكتب تاريخين بصيغة YYYY-MM-DD."
+                : "Please choose check-in and check-out using the fields below, or type two dates (YYYY-MM-DD).",
               withUser,
             );
             return;
           }
-          let { checkIn, checkOut } = resolvedDates;
-          if (new Date(checkOut) <= new Date(checkIn)) {
-            const d = new Date(checkIn);
-            d.setDate(d.getDate() + 1);
-            checkOut = d.toISOString().slice(0, 10);
-          }
-
-          const nextContext = { ...context, checkIn, checkOut };
-          setContext(nextContext);
-          saveMemory({ context: nextContext, history: withUser });
-          navigateWithContext({ navigate, updateBookingUi, ctx: nextContext, fallbackGuests: 1 });
-          setHotelOptions([]);
-          setRoomOptions([]);
-
-          pushTurn("assistant", "Step 2 saved. Step 3: how many guests will stay?", withUser, nextContext);
-          return;
-        }
-
-        // Step 3: guests (then show hotel options)
-        if (!hasGuests) {
-          const guests = extractGuestsCount(normalizedText);
-          if (!guests) {
-            pushTurn("assistant", "Please tell me the number of guests (e.g. 2).", withUser);
+          if (!hasG) {
+            pushTurn(
+              "assistant",
+              systemLang === "ar"
+                ? "رجاءً اختر عدد الضيوف من الشريط أدناه، أو اكتب العدد (مثال: 3 ضيوف)."
+                : "Please choose the number of guests with the slider below, or say the count (e.g. 3 guests).",
+              withUser,
+            );
             return;
           }
-          const nextContext = { ...context, guests };
+
+          const nextContext = { ...context, checkIn, checkOut, guests };
           setContext(nextContext);
           saveMemory({ context: nextContext, history: withUser });
+          navigateWithContext({ navigate, updateBookingUi, ctx: nextContext, fallbackGuests: guests });
 
           const q = new URLSearchParams();
-          if (nextContext?.anyCity) {
-            // no city param
-          } else if (nextContext?.city) {
-            q.set("city", nextContext.city);
-          }
+          if (!nextContext?.anyCity && nextContext?.city) q.set("city", nextContext.city);
           q.set("from", nextContext.checkIn);
           q.set("to", nextContext.checkOut);
           q.set("guests", String(guests));
@@ -1719,24 +1822,38 @@ function BookingAssistantInner({ embedded = false }) {
           pushTurn(
             "assistant",
             options.length
-              ? "Step 3 saved. Step 4: choose a hotel from the options below."
-              : "I couldn't find hotels with these filters. Try different dates/guests, or say another city.",
+              ? systemLang === "ar"
+                ? "تم حفظ الخطوة 2 (التواريخ والضيوف). الخطوة 3: اختر فندقاً من الخيارات أدناه."
+                : "Step 2 saved (dates & guests). Step 3: choose a hotel from the options below."
+              : systemLang === "ar"
+                ? "لم أجد فنادق بهذه المعايير. جرّب تواريخ أو عدد ضيوف مختلفاً، أو مدينة أخرى."
+                : "I couldn't find hotels with these filters. Try different dates, guests, or another city.",
             withUser,
             nextContext,
           );
           return;
         }
 
-        // Step 4: ensure hotel options are visible
+        // Step 3: ensure hotel options are visible once city + dates + guests are set
         if (!hasHotel) {
           const options = await fetchHotelOptionsForContext(context);
           setHotelOptions(options);
           setRoomOptions([]);
-          pushTurn("assistant", options.length ? "Step 4: choose a hotel from the options below." : "No hotels found. Try changing dates/guests.", withUser);
+          pushTurn(
+            "assistant",
+            options.length
+              ? systemLang === "ar"
+                ? "الخطوة 3: اختر فندقاً من الخيارات أدناه."
+                : "Step 3: choose a hotel from the options below."
+              : systemLang === "ar"
+                ? "لم يُعثر على فنادق. جرّب تغيير التواريخ أو الضيوف."
+                : "No hotels found. Try changing dates or guests.",
+            withUser,
+          );
           return;
         }
 
-        // Step 5-6 are handled by existing room selection + confirm booking UI.
+        // Steps 4–5: room selection + confirm / payment (existing UI).
       }
 
       if (
@@ -2670,7 +2787,7 @@ function BookingAssistantInner({ embedded = false }) {
           hotelsList.length > 0
             ? `Here are available hotels${effectiveContext?.city ? ` in ${effectiveContext.city}` : ""}. Which hotel would you like?`
             : "No hotels found for these filters. Please update city, dates, or guests.";
-      } else if (strictStep === 6) {
+      } else if (strictStep === 5) {
         const selectedHotelId = Number(effectiveContext?.selectedHotelId || 0);
         if (selectedHotelId > 0) {
           const q = new URLSearchParams();
@@ -2722,6 +2839,11 @@ function BookingAssistantInner({ embedded = false }) {
       guests: Number(confirmDraft.guests || 1),
     });
     pushTurn("assistant", "Opening payment form. Choose card or cash and finish booking there.");
+    try {
+      sessionStorage.setItem(ASSISTANT_AWAITING_BOOKING_SUCCESS_KEY, "1");
+    } catch {
+      // ignore storage issues
+    }
     navigate(`/hotels/${confirmDraft.hotel.id}?${q.toString()}#room-types`, {
       state: {
         intent: {
@@ -2749,6 +2871,7 @@ function BookingAssistantInner({ embedded = false }) {
     setPickDialog(null);
     setAssistantPickerDismissed(false);
     setGuideEnabled(false);
+    setDatesGuestsDraft(createDefaultDatesGuestsDraft());
     saveMemory({ context: {}, history: [] });
     if (!embedded) resetAssistantToBottomRight(posRef, setPos);
   }
@@ -2868,6 +2991,7 @@ function BookingAssistantInner({ embedded = false }) {
     setSelectedRoomOptionId(null);
     setPickDialog(null);
     setAssistantPickerDismissed(false);
+    setDatesGuestsDraft(createDefaultDatesGuestsDraft());
     saveMemory({ context: nextContext, history: nextChat, ui: { guideEnabled: true } });
     queueMicrotask(() => {
       scrollerRef.current?.scrollTo({ top: scrollerRef.current.scrollHeight, behavior: "smooth" });
@@ -2986,18 +3110,22 @@ function BookingAssistantInner({ embedded = false }) {
                 <span className="muted">
                   {embedded
                     ? (systemLang === "ar"
-                        ? "اسأل عن المدينة أو التواريخ أو عدد الضيوف أو اسم فندق محدد. سأرشدك خطوة بخطوة."
-                        : "Ask for city, dates, guests, or a specific hotel name. I will guide each step clearly.")
+                        ? "المدينة أولاً، ثم التواريخ وعدد الضيوف، ثم الفندق. سأرشدك خطوة بخطوة."
+                        : "City first, then dates and guests, then your hotel — I will guide each step.")
                     : bookingContextHint}
                 </span>
                 {showStepper ? (
                   <div className="assistant-stepper" aria-label="Booking progress">
                     <div className="assistant-stepper__top">
-                      <span>{systemLang === "ar" ? `الخطوة ${flowStep.number} من 6` : `Step ${flowStep.number} of 6`}</span>
+                      <span>
+                        {systemLang === "ar"
+                          ? `الخطوة ${flowStep.number} من ${GUIDED_FLOW_TOTAL_STEPS}`
+                          : `Step ${flowStep.number} of ${GUIDED_FLOW_TOTAL_STEPS}`}
+                      </span>
                       <small>{flowStep.label}</small>
                     </div>
                     <div className="assistant-stepper__bar" role="presentation">
-                      <span style={{ width: `${Math.round((flowStep.number / 6) * 100)}%` }} />
+                      <span style={{ width: `${Math.round((flowStep.number / GUIDED_FLOW_TOTAL_STEPS) * 100)}%` }} />
                     </div>
                   </div>
                 ) : null}
@@ -3054,6 +3182,70 @@ function BookingAssistantInner({ embedded = false }) {
           </div>
 
           {/* Input row */}
+          {showDatesGuestsPicker ? (
+            <div className="assistant-datesGuests" aria-label="Choose dates and guests">
+              <div className="assistant-datesGuests__row">
+                <label className="assistant-datesGuests__field">
+                  <span className="assistant-datesGuests__label">{systemLang === "ar" ? "تاريخ الوصول" : "Check-in"}</span>
+                  <input
+                    type="date"
+                    value={datesGuestsDraft.checkIn}
+                    min={todayIso()}
+                    onChange={(e) => {
+                      const checkIn = e.target.value;
+                      const checkOut = isIsoOnOrBefore(datesGuestsDraft.checkOut, checkIn)
+                        ? addDaysIso(checkIn, 1)
+                        : datesGuestsDraft.checkOut;
+                      setDatesGuestsDraft((prev) => ({ ...prev, checkIn, checkOut }));
+                    }}
+                    disabled={loading}
+                  />
+                </label>
+
+                <label className="assistant-datesGuests__field">
+                  <span className="assistant-datesGuests__label">{systemLang === "ar" ? "تاريخ المغادرة" : "Check-out"}</span>
+                  <input
+                    type="date"
+                    value={datesGuestsDraft.checkOut}
+                    min={addDaysIso(datesGuestsDraft.checkIn, 1)}
+                    onChange={(e) => setDatesGuestsDraft((prev) => ({ ...prev, checkOut: e.target.value }))}
+                    disabled={loading}
+                  />
+                </label>
+              </div>
+
+              <div className="assistant-datesGuests__row assistant-datesGuests__row--guests">
+                <div className="assistant-datesGuests__guestsHead">
+                  <span className="assistant-datesGuests__label">{systemLang === "ar" ? "عدد الضيوف" : "Guests"}</span>
+                  <strong className="assistant-datesGuests__value">{datesGuestsDraft.guests}</strong>
+                </div>
+                <input
+                  type="range"
+                  min={1}
+                  max={7}
+                  step={1}
+                  value={datesGuestsDraft.guests}
+                  onChange={(e) => setDatesGuestsDraft((prev) => ({ ...prev, guests: Number(e.target.value) }))}
+                  disabled={loading}
+                  aria-label={systemLang === "ar" ? "اختيار عدد الضيوف" : "Choose number of guests"}
+                />
+              </div>
+
+              <div className="assistant-datesGuests__actions">
+                <button
+                  type="button"
+                  className="btn btn-teal assistant-datesGuests__apply"
+                  disabled={loading || !datesGuestsDraft.checkIn || !datesGuestsDraft.checkOut}
+                  onClick={() => {
+                    const text = `Check-in ${datesGuestsDraft.checkIn}, check-out ${datesGuestsDraft.checkOut}, guests ${datesGuestsDraft.guests}`;
+                    sendMessage(text);
+                  }}
+                >
+                  {systemLang === "ar" ? "تأكيد" : "Apply"}
+                </button>
+              </div>
+            </div>
+          ) : null}
           <div className="assistant-actions">
             <input
               ref={inputRef}
@@ -3097,8 +3289,8 @@ function BookingAssistantInner({ embedded = false }) {
                       type: "hotel",
                       title:
                         systemLang === "ar"
-                          ? `الخطوة 4: اختر الفندق (${hotelOptions.length})`
-                          : `Step 4: Choose your hotel (${hotelOptions.length} options)`,
+                          ? `الخطوة 3: اختر الفندق (${hotelOptions.length})`
+                          : `Step 3: Choose your hotel (${hotelOptions.length} options)`,
                       items: hotelOptions,
                     });
                   } else if (pickerStep === "room") {
@@ -3106,8 +3298,8 @@ function BookingAssistantInner({ embedded = false }) {
                       type: "room",
                       title:
                         systemLang === "ar"
-                          ? `الخطوة 5: اختر نوع الغرفة (${roomOptions.length})`
-                          : `Step 5: Choose your room type (${roomOptions.length} options)`,
+                          ? `الخطوة 4: اختر نوع الغرفة (${roomOptions.length})`
+                          : `Step 4: Choose your room type (${roomOptions.length} options)`,
                       items: roomOptions,
                     });
                   }

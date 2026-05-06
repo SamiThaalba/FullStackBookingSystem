@@ -11,11 +11,7 @@ function FlagRound({ country, px = 36, className = "" }) {
   const h = px;
 
   if (broken) {
-    return (
-      <span className={`lang-flag-fallback ${className}`} aria-hidden>
-        {country === "us" ? "EN" : "ع"}
-      </span>
-    );
+    return <span className={`lang-switcher__flag-round ${className}`} aria-hidden />;
   }
 
   return (
@@ -70,7 +66,7 @@ export default function LanguageSwitcher() {
         aria-label={t("layout.languageTriggerAria", { lang: t(active.labelKey) })}
         onClick={() => setOpen((v) => !v)}
       >
-        <FlagRound country={active.country} px={36} />
+        <FlagRound country={active.country} px={32} />
       </button>
 
       {open ? (
