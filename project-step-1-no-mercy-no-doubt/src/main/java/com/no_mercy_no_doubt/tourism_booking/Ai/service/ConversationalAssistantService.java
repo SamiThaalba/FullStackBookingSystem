@@ -103,6 +103,31 @@ public class ConversationalAssistantService {
             context.setAnyCity(true);
             context.setCity(null);
         }
+        if (userWantsHotelCatalog(userText)) {
+            context.setAnyCity(true);
+            context.setCity(null);
+            context.setSelectedHotelId(null);
+            context.setSelectedHotelName(null);
+            context.setPendingHotelName(null);
+            context.setSelectedRoomTypeId(null);
+            context.setSelectedRoomTypeName(null);
+            context.setMode("searching");
+            List<HotelRecommendationResponse> recommendations = buildRecommendations(context, null);
+            return AssistantChatResponse.builder()
+                    .reply("Sure. I will show available hotels instead of treating that as a hotel name.")
+                    .intent("search")
+                    .context(context)
+                    .missingFields(List.of())
+                    .action(AssistantActionPlan.builder()
+                            .type("NAVIGATE_DISCOVER")
+                            .city(context.getCity())
+                            .checkIn(context.getCheckIn())
+                            .checkOut(context.getCheckOut())
+                            .guests(context.getGuests())
+                            .build())
+                    .recommendations(recommendations)
+                    .build();
+        }
         if (userIsUnsureAboutCity(userText) && isBlank(context.getCity()) && context.getSelectedHotelId() == null) {
             return AssistantChatResponse.builder()
                     .reply("No problem. If city does not matter, say: any city. Or tell me one city in Palestine, like Bethlehem or Ramallah.")
@@ -332,6 +357,7 @@ public class ConversationalAssistantService {
                 Detect intent and extract slots from the user's latest message.
                 Supported intents: search, booking, filter, follow_up, reset, other.
                 Awareness rules:
+                - "show/list/view all hotels" means browse hotel listings, not a hotel named "show me all".
                 - If the assistant just asked for a city, a short place name is city, not hotel.
                 - If the assistant just asked for guests, a number means guests, not option selection.
                 - Use selectedHotelName only when the user clearly names a hotel or chooses from visible hotel options.
@@ -562,12 +588,35 @@ public class ConversationalAssistantService {
         return value.contains("any city")
                 || compact.contains("anycity")
                 || value.contains("all cities")
+                || value.contains("all hotels")
+                || value.contains("all hotel")
                 || value.contains("anywhere")
                 || value.equals("any")
                 || value.contains("doesn't matter")
                 || value.contains("doesnt matter")
                 || value.contains("don't care")
                 || value.contains("dont care");
+    }
+
+    private boolean userWantsHotelCatalog(String text) {
+        String value = String.valueOf(text == null ? "" : text)
+                .toLowerCase(Locale.ROOT)
+                .trim()
+                .replaceAll("[.!?]+$", "")
+                .replaceAll("\\s+", " ");
+        if (value.isBlank() || !value.matches(".*\\bhotels?\\b.*")) {
+            return false;
+        }
+        if (value.matches(".*\\b(called|named|name is)\\b.*")) {
+            return false;
+        }
+        if (value.matches("^(all\\s+)?hotels?$")) {
+            return true;
+        }
+        boolean browseVerb = value.matches(".*\\b(show|list|see|view|browse|display|give|get|find|search)\\b.*");
+        boolean collection = value.matches(".*\\b(all|available|options|every|any)\\b.*")
+                || value.matches(".*\\bhotels?\\s*(please)?$");
+        return browseVerb && collection;
     }
 
     private String resolveRequestedHotelName(String message, String slotHotelName, AssistantContext context) {
@@ -608,7 +657,11 @@ public class ConversationalAssistantService {
 
     private String cleanHotelCandidate(String value) {
         String cleaned = cleanChoiceCandidate(value);
-        if (isBlank(cleaned) || looksLikeKnownCity(cleaned) || userMeansAnyCity(cleaned) || looksLikeGuestsOrDateMessage(cleaned)) {
+        if (isBlank(cleaned)
+                || looksLikeKnownCity(cleaned)
+                || userMeansAnyCity(cleaned)
+                || userWantsHotelCatalog(cleaned)
+                || looksLikeGuestsOrDateMessage(cleaned)) {
             return null;
         }
         return cleaned;

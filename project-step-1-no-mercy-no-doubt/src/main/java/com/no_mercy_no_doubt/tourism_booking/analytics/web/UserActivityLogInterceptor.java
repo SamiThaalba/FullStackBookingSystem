@@ -31,6 +31,9 @@ public class UserActivityLogInterceptor implements HandlerInterceptor {
         if (!path.startsWith("/api/") || path.startsWith("/api/auth")) {
             return;
         }
+        if (!isManagerActivityPath(path)) {
+            return;
+        }
 
         try {
             AppUser currentUser = currentUserProvider.getCurrentUser();
@@ -65,5 +68,12 @@ public class UserActivityLogInterceptor implements HandlerInterceptor {
         if ("PUT".equalsIgnoreCase(method) || "PATCH".equalsIgnoreCase(method)) return "UPDATE";
         if ("DELETE".equalsIgnoreCase(method)) return "DELETE";
         return null;
+    }
+
+    private boolean isManagerActivityPath(String path) {
+        return path.startsWith("/api/hotels")
+                || path.startsWith("/api/room-type")
+                || path.startsWith("/api/bookings")
+                || path.startsWith("/api/payments");
     }
 }

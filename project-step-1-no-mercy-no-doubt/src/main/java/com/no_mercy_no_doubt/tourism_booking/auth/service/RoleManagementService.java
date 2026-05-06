@@ -174,7 +174,7 @@ public class RoleManagementService {
     }
 
     public boolean canBypassHotelScope(AppUser user) {
-        return userHasPermission(user, "hotel:view_all") && !userHasManagerPermissions(user);
+        return userHasPermission(user, "hotel:view_all");
     }
 
     public UserResponse toUserResponse(AppUser user) {
