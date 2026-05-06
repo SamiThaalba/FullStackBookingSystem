@@ -11,6 +11,7 @@ import NotificationSlideIn from "./NotificationSlideIn";
 import ThemeToggle from "./ThemeToggle";
 import BookingAssistant from "./BookingAssistant";
 import { useNotificationRealtime } from "../hooks/useNotificationRealtime";
+import { FaFacebookF, FaInstagram, FaLinkedinIn, FaTwitter } from "react-icons/fa";
 
 /** Dev StrictMode remounts reset hooks; avoid duplicate ui-language PATCH in quick succession. */
 let lastUiLanguagePatch = { signature: "", at: 0 };
@@ -153,23 +154,98 @@ export default function Layout() {
       {location.pathname === "/" ? null : <BookingAssistant />}
 
       <footer className="site-footer">
-        <div className="container footer-grid">
-          <div>
-            <div className="brand footer-brand">
-              <span className="brand-logo-wrap" aria-hidden>
-                <img className="brand-logo" src="/logo.png" alt="" />
-              </span>
-              <span>QuickReserve</span>
+        <div className="container site-footer__inner">
+          <div className="footer-grid">
+            <div className="footer-col footer-col--brand">
+              <div className="brand footer-brand" aria-label={t("layout.brandAria")}>
+                <span className="brand-logo-wrap" aria-hidden>
+                  <img className="brand-logo" src="/logo.png" alt="" />
+                </span>
+                <span>QuickReserve</span>
+              </div>
+              <p className="footer-text">{t("layout.footerTagline")}</p>
             </div>
-            <p>{t("layout.footerTagline")}</p>
+
+            <div className="footer-col">
+              <h3 className="footer-title">{t("layout.discover")}</h3>
+              <nav aria-label="Footer links">
+                <ul className="footer-links">
+                  <li><NavLink to="/hotels">{t("layout.discover")}</NavLink></li>
+                  {auth.isAuthenticated ? (
+                    <>
+                      <li><NavLink to="/wishlist">Wishlist</NavLink></li>
+                      <li><NavLink to="/profile">{t("layout.myProfile")}</NavLink></li>
+                    </>
+                  ) : (
+                    <>
+                      <li><NavLink to="/login">{t("layout.logIn")}</NavLink></li>
+                      <li><NavLink to="/register">{t("layout.signUp")}</NavLink></li>
+                    </>
+                  )}
+                </ul>
+              </nav>
+            </div>
+
+            <div className="footer-col">
+              <h3 className="footer-title">{t("layout.followUs")}</h3>
+              <nav aria-label={t("layout.followUs")}>
+                <div className="footer-social">
+                  <a
+                    className="footer-social__btn"
+                    href="https://facebook.com"
+                    target="_blank"
+                    rel="noreferrer"
+                    aria-label="Facebook"
+                    title="Facebook"
+                  >
+                    <FaFacebookF size={16} aria-hidden />
+                  </a>
+                  <a
+                    className="footer-social__btn"
+                    href="https://instagram.com"
+                    target="_blank"
+                    rel="noreferrer"
+                    aria-label="Instagram"
+                    title="Instagram"
+                  >
+                    <FaInstagram size={16} aria-hidden />
+                  </a>
+                  <a
+                    className="footer-social__btn"
+                    href="https://twitter.com"
+                    target="_blank"
+                    rel="noreferrer"
+                    aria-label="Twitter"
+                    title="Twitter"
+                  >
+                    <FaTwitter size={16} aria-hidden />
+                  </a>
+                  <a
+                    className="footer-social__btn"
+                    href="https://linkedin.com"
+                    target="_blank"
+                    rel="noreferrer"
+                    aria-label="LinkedIn"
+                    title="LinkedIn"
+                  >
+                    <FaLinkedinIn size={16} aria-hidden />
+                  </a>
+                </div>
+              </nav>
+            </div>
+
+            <div className="footer-col">
+              <h3 className="footer-title">{t("layout.projectTeam")}</h3>
+              <p className="footer-text">Malik Alhurani</p>
+              <p className="footer-text">Sami Thalbah</p>
+              <p className="footer-text">Nicola Rabee</p>
+
+            </div>
           </div>
-          <div>
-            <h3>{t("layout.followUs")}</h3>
-            <p>{t("layout.socialPlaceholder")}</p>
-          </div>
-          <div>
-            <h3>{t("layout.projectTeam")}</h3>
-            <p>Malik Alhurani, Sami Thalbah, Nicola Rabee</p>
+
+          <div className="footer-bottom" role="contentinfo">
+            <p className="footer-bottom__text">© {new Date().getFullYear()} QuickReserve</p>
+            <p className="footer-bottom__text">Built with care for a smooth booking experience.</p>
           </div>
         </div>
       </footer>

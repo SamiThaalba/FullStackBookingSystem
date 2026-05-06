@@ -400,31 +400,37 @@ export default function HotelDetails() {
                       )}
                     </div>
                     <div className="room-card__content">
-                      <h3>{room.name}</h3>
-                      <p>{room.description || t("hotelDetail.defaultRoomDescription")}</p>
-                      <div className="amenity-row">
-                        <span>{t("hotelDetail.sleepsCount", { count: room.capacity })}</span>
-                        <span>{t("hotelDetail.inventoryRooms", { count: room.inventoryCount })}</span>
-                        {(room.amenities || []).slice(0, 3).map((amenity) => (
-                          <span key={amenity}>{amenity}</span>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="room-price">
+                      <h3 className="room-card__title" title={room.name}>
+                        {room.name}
+                      </h3>
 
-                      <strong>{money(room.basePrice)} {t("hotelDetail.perNight")}</strong>
-                      <button className="btn btn-teal room-action-btn room-action-btn--primary" onClick={() => quoteMutation.mutate(room)}>
-                        {t("hotelDetail.checkAvailability")}
-                      </button>
+                      <p className="room-card__desc">
+                        {room.description || t("hotelDetail.defaultRoomDescription")}
+                      </p>
+
+                      {(room.capacity || room.inventoryCount || (room.amenities || []).length) ? (
+                        <div className="amenity-row">
+                          <span>{t("hotelDetail.sleepsCount", { count: room.capacity })}</span>
+                          <span>{t("hotelDetail.inventoryRooms", { count: room.inventoryCount })}</span>
+                          {(room.amenities || []).slice(0, 2).map((amenity) => (
+                            <span key={amenity}>{amenity}</span>
+                          ))}
+                          {(room.amenities || []).length > 2 ? (
+                            <span className="amenity-more">+{(room.amenities || []).length - 2}</span>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </div>
+                    <aside className="room-card__actions" aria-label={`${room.name} actions`}>
                       {auth.isAuthenticated ? (
-                        <div className="room-actions">
+                        <div className="room-card__actionsTop">
                           <RoomWishlistButton
                             room={room}
                             hotel={hotel}
                             enabled={auth.isAuthenticated}
                           />
                           <button
-                            className="btn btn-small btn-outline room-action-btn"
+                            className="btn btn-small btn-outline room-card__alertBtn"
                             type="button"
                             onClick={() => {
                               setAlertOpenFor(room.id);
@@ -434,8 +440,22 @@ export default function HotelDetails() {
                             {t("hotelDetail.addAlert")}
                           </button>
                         </div>
-                      ) : null}
-                    </div>
+                      ) : (
+                        <div className="room-card__actionsTop room-card__actionsTop--guest" aria-hidden />
+                      )}
+
+                      <div className="room-card__priceBlock">
+                        <div className="room-card__priceValue">{money(room.basePrice)}</div>
+                        <div className="room-card__priceMeta">{t("hotelDetail.perNight")}</div>
+                      </div>
+
+                      <button
+                        className="btn btn-teal room-action-btn room-action-btn--primary"
+                        onClick={() => quoteMutation.mutate(room)}
+                      >
+                        {t("hotelDetail.checkAvailability")}
+                      </button>
+                    </aside>
                   </article>
                 ))}
               </div>
