@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Client } from "@stomp/stompjs";
-import SockJS from "sockjs-client/dist/sockjs";
+import SockJS from "sockjs-client/dist/sockjs.min.js";
 import { readStoredAuth } from "../api/client";
 import { getSockJsUrl } from "../utils/wsUrl";
 
@@ -83,4 +83,3 @@ export function useNotificationRealtime(enabled) {
 }
 
 export const notificationRealtimeEventName = EVENT_NAME;
-
