@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { bookingApi } from "../api/bookingApi";
@@ -29,6 +29,33 @@ const DEFAULT_PAYMENT_DRAFT = {
   expiry: "",
   cvv: "",
 };
+
+function buildDiscountPricing({ room, nights, guests }) {
+  const safeNights = Number.isFinite(Number(nights)) ? Math.max(1, Number(nights)) : 1;
+  const safeGuests = Number.isFinite(Number(guests)) ? Math.max(1, Number(guests)) : 1;
+  const basePrice = Number(room?.basePrice || 0);
+  const baseTotal = basePrice * safeNights;
+
+  let discountRate = 0;
+  const reasons = [];
+  if (safeNights >= 5) {
+    discountRate += 0.1;
+    reasons.push("extendedStay");
+  }
+  if (safeGuests >= 4) {
+    discountRate += 0.07;
+    reasons.push("groupSize");
+  }
+  if (Number(room?.inventoryCount || 0) >= 10) {
+    discountRate += 0.05;
+    reasons.push("highRoomAvailability");
+  }
+  discountRate = Math.min(discountRate, 0.22);
+
+  const discountAmount = baseTotal * discountRate;
+  const finalTotal = Math.max(0, baseTotal - discountAmount);
+  return { baseTotal, discountRate, discountAmount, finalTotal, reasons };
+}
 
 export default function HotelDetails() {
   const { t } = useTranslation();
@@ -99,6 +126,7 @@ export default function HotelDetails() {
           room: selectedRoom,
           payment: paymentResult,
           paymentMethod,
+          pricing: discountPricing,
         },
       });
     },
@@ -145,6 +173,15 @@ export default function HotelDetails() {
     return Boolean(name) && name !== "room type name is required.";
   });
   const nights = nightsBetween(dates.checkIn, dates.checkOut);
+  const discountPricing = useMemo(
+    () =>
+      buildDiscountPricing({
+        room: selectedRoom,
+        nights,
+        guests: Number(dates.guests),
+      }),
+    [selectedRoom, nights, dates.guests],
+  );
   const aiFocusRooms = searchParams.get("ai") === "1";
 
   useEffect(() => {
@@ -419,17 +456,24 @@ export default function HotelDetails() {
                   </div>
                   <div className="price-line">
                     <span>{t("hotelDetail.labelBaseTotal")}</span>
-                    <strong>{money((selectedRoom?.basePrice || 0) * nights)}</strong>
+                    <strong>{money(discountPricing.baseTotal)}</strong>
                   </div>
-                  {typeof quote.totalPrice === "number" ? (
+                  {discountPricing.discountAmount > 0 ? (
                     <div className="price-line">
-                      <span>{t("hotelDetail.labelDynamicPricing")}</span>
-                      <strong>{money(quote.totalPrice - (selectedRoom?.basePrice || 0) * nights)}</strong>
+                      <span>{t("hotelDetail.labelDiscount")}</span>
+                      <strong>-{money(discountPricing.discountAmount)}</strong>
                     </div>
+                  ) : null}
+                  {discountPricing.discountAmount > 0 ? (
+                    <p className="muted" style={{ marginTop: "-8px" }}>
+                      {t("hotelDetail.discountApplied", {
+                        reasons: discountPricing.reasons.map((reason) => t(`hotelDetail.discountReason.${reason}`)).join(", "),
+                      })}
+                    </p>
                   ) : null}
                   <div className="price-line">
                     <span>{t("hotelDetail.labelTotal")}</span>
-                    <strong>{money(quote.totalPrice)}</strong>
+                    <strong>{money(discountPricing.finalTotal)}</strong>
                   </div>
                   <button
                     className="btn btn-primary btn-full"

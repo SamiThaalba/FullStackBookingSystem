@@ -147,7 +147,13 @@
     "labelRoom": "Room",
     "labelNights": "Nights",
     "labelBaseTotal": "Base total",
-    "labelDynamicPricing": "Dynamic pricing",
+    "labelDiscount": "Discount",
+    "discountApplied": "Discount applied because of: {{reasons}}.",
+    "discountReason": {
+      "extendedStay": "extended stay",
+      "groupSize": "group size",
+      "highRoomAvailability": "high room availability"
+    },
     "labelTotal": "Total",
     "booking": "Booking...",
     "createBooking": "Create booking",

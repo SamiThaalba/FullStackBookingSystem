@@ -144,7 +144,13 @@
     "labelRoom": "الغرفة",
     "labelNights": "الليالي",
     "labelBaseTotal": "الإجمالي الأساسي",
-    "labelDynamicPricing": "تسعير ديناميكي",
+    "labelDiscount": "الخصم",
+    "discountApplied": "تم تطبيق خصم بسبب: {{reasons}}.",
+    "discountReason": {
+      "extendedStay": "الإقامة الطويلة",
+      "groupSize": "عدد الضيوف الكبير",
+      "highRoomAvailability": "توفر غرف كثير"
+    },
     "labelTotal": "الإجمالي",
     "booking": "جاري الحجز...",
     "createBooking": "إنشاء حجز",
