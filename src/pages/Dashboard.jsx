@@ -43,6 +43,16 @@ const PAYMENT_LABELS = {
 export default function Dashboard() {
     const queryClient = useQueryClient();
     const auth = useAuth();
+    const canCreateHotel = auth.hasPermission("hotel:create");
+    const canViewHotels = auth.hasPermission("hotel:view") || auth.hasPermission("hotel:view_all");
+    const canCreateRoom = auth.hasPermission("room:create") && canViewHotels;
+    const canViewRooms = auth.hasPermission("room:view");
+    const canViewBookings = auth.hasPermission("booking:view");
+    const visibleTabs = TABS.filter((tab) => {
+        if (tab === "Hotels") return canViewHotels || canCreateHotel;
+        if (tab === "Bookings") return canViewBookings;
+        return true;
+    });
     const [tab,setTab] = useState("Overview");
     const [hotelForm,setHotelForm] = useState(emptyHotel);
     const [showHotelForm,setShowHotelForm] = useState(false);
@@ -115,6 +125,7 @@ export default function Dashboard() {
     const hotelsQuery = useQuery({
         queryKey:["my-hotels"],
         queryFn:() => bookingApi.getMyHotels(),
+        enabled: canViewHotels,
     });
     const hotels = hotelsQuery.data ?? [];
 
@@ -128,12 +139,13 @@ export default function Dashboard() {
     const roomTypesQuery = useQuery({
         queryKey:["room-types",expandedHotelId],
         queryFn:() => bookingApi.getRoomTypes(expandedHotelId),
-        enabled: expandedHotelId != null,
+        enabled: expandedHotelId != null && canViewRooms,
     });
 
     const upcomingQuery = useQuery({
         queryKey:["upcoming-bookings",selectedHotelId],
         queryFn:() => bookingApi.upcomingBookings(selectedHotelId ? Number(selectedHotelId) : undefined),
+        enabled: canViewBookings,
     });
     const upcoming = upcomingQuery.data ?? [];
 
@@ -399,7 +411,7 @@ export default function Dashboard() {
 
             {/* Tabs */}
             <div style={{display:"flex",gap:8,marginBottom:24,borderBottom:"2px solid var(--line)",paddingBottom:0}}>
-                {TABS.map(t=>(
+                {visibleTabs.map(t=>(
                     <button key={t} onClick={()=>setTab(t)} style={{border:"none",background:"none",padding:"10px 18px",fontWeight:800,fontSize:"0.93rem",cursor:"pointer",color:tab===t?"var(--purple)":"var(--muted)",borderBottom:tab===t?"3px solid var(--purple)":"3px solid transparent",marginBottom:-2,transition:"color 0.15s"}}>
                         {t}
                         {t==="Bookings"&&pendingCount>0&&<span style={{marginLeft:6,background:"#fbbf24",color:"#78350f",borderRadius:999,padding:"2px 7px",fontSize:"0.75rem"}}>{pendingCount}</span>}
@@ -413,9 +425,9 @@ export default function Dashboard() {
                     <div className="panel">
                         <h2 style={{marginTop:0,color:"var(--purple-dark)"}}>Quick actions</h2>
                         <div style={{display:"grid",gap:10}}>
-                            {auth.hasPermission("hotel:create")&&<button className="btn btn-teal btn-full" onClick={()=>{setTab("Hotels");setShowHotelForm(true);}}>+ Create hotel</button>}
-                            {hotels.length>0&&<button className="btn btn-outline btn-full" onClick={()=>{setTab("Hotels");setShowRoomForm(true);}}>+ Add room type</button>}
-                            <button className="btn btn-outline btn-full" onClick={()=>setTab("Bookings")}>View bookings {pendingCount>0&&`(${pendingCount} pending)`}</button>
+                            {canCreateHotel&&<button className="btn btn-teal btn-full" onClick={()=>{setTab("Hotels");setShowHotelForm(true);}}>+ Create hotel</button>}
+                            {canCreateRoom&&hotels.length>0&&<button className="btn btn-outline btn-full" onClick={()=>{setTab("Hotels");setShowRoomForm(true);}}>+ Add room type</button>}
+                            {canViewBookings&&<button className="btn btn-outline btn-full" onClick={()=>setTab("Bookings")}>View bookings {pendingCount>0&&`(${pendingCount} pending)`}</button>}
                         </div>
                     </div>
                     <div className="panel">
@@ -439,11 +451,11 @@ export default function Dashboard() {
             {tab==="Hotels"&&(
                 <div>
                     <div style={{display:"flex",gap:10,marginBottom:20,flexWrap:"wrap"}}>
-                        {auth.hasPermission("hotel:create")&&<button className="btn btn-teal btn-small" onClick={()=>{setShowHotelForm(v=>!v);setShowRoomForm(false);}}>{showHotelForm?"✕ Cancel":"+ New hotel"}</button>}
-                        {hotels.length>0&&<button className="btn btn-outline btn-small" onClick={()=>{setShowRoomForm(v=>!v);setShowHotelForm(false);}}>{showRoomForm?"✕ Cancel":"+ Add room type"}</button>}
+                        {canCreateHotel&&<button className="btn btn-teal btn-small" onClick={()=>{setShowHotelForm(v=>!v);setShowRoomForm(false);}}>{showHotelForm?"✕ Cancel":"+ New hotel"}</button>}
+                        {canCreateRoom&&hotels.length>0&&<button className="btn btn-outline btn-small" onClick={()=>{setShowRoomForm(v=>!v);setShowHotelForm(false);}}>{showRoomForm?"✕ Cancel":"+ Add room type"}</button>}
                     </div>
 
-                    {showHotelForm&&auth.hasPermission("hotel:create")&&(
+                    {showHotelForm&&canCreateHotel&&(
                         <div className="panel" style={{marginBottom:24}}>
                             <h3 style={{marginTop:0,color:"var(--purple-dark)"}}>Create hotel</h3>
                             <form className="modal-grid" style={{gap:14}} onSubmit={submitCreateHotel}>
@@ -488,7 +500,7 @@ export default function Dashboard() {
                         </div>
                     )}
 
-                    {showRoomForm&&(
+                    {showRoomForm&&canCreateRoom&&(
                         <div className="panel" style={{marginBottom:24}}>
                             <h3 style={{marginTop:0,color:"var(--purple-dark)"}}>Add room type</h3>
                             <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}}>
@@ -575,7 +587,7 @@ export default function Dashboard() {
                                     <div style={{borderTop:"1px solid var(--line)",background:"#faf9fb",padding:"16px 20px"}}>
                                         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
                                             <span style={{fontWeight:700,color:"var(--muted)",fontSize:"0.85rem",textTransform:"uppercase",letterSpacing:"0.06em"}}>Room types</span>
-                                            {auth.hasPermission("room:create")&&<button className="btn btn-small btn-teal" onClick={()=>{setRoomForm({...emptyRoom,hotelId:String(hotel.id)});setShowRoomForm(true);setShowHotelForm(false);window.scrollTo({top:0,behavior:"smooth"});}}>+ Add room</button>}
+                                            {canCreateRoom&&<button className="btn btn-small btn-teal" onClick={()=>{setRoomForm({...emptyRoom,hotelId:String(hotel.id)});setShowRoomForm(true);setShowHotelForm(false);window.scrollTo({top:0,behavior:"smooth"});}}>+ Add room</button>}
                                         </div>
                                         {roomTypesQuery.isLoading&&expandedHotelId===hotel.id&&<p className="muted">Loading rooms…</p>}
                                         {!roomTypesQuery.isLoading&&(roomTypesQuery.data??[]).length===0&&<p className="muted" style={{fontSize:"0.9rem"}}>No room types added yet.</p>}

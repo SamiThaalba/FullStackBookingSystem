@@ -40,6 +40,39 @@ function groupPermissions(allPermissions = []) {
   return entries.map(([group, items]) => ({ group, items }));
 }
 
+const MANAGER_ACTIVITY_RESOURCES = new Set(["hotels", "room-type", "bookings", "payments"]);
+
+function isUsefulManagerActivity(row) {
+  return MANAGER_ACTIVITY_RESOURCES.has(String(row?.resourceType || "").toLowerCase());
+}
+
+function formatActivityResource(row) {
+  const type = String(row?.resourceType || "").toLowerCase();
+  const labels = {
+    hotels: "hotel",
+    "room-type": "room type",
+    bookings: "booking",
+    payments: "payment",
+  };
+  const label = labels[type] || "item";
+  return row?.resourceId ? `${label} #${row.resourceId}` : label;
+}
+
+function formatActivityVerb(row) {
+  const endpoint = String(row?.endpoint || "").toLowerCase();
+  if (endpoint.includes("/confirm")) return "Confirmed";
+  if (endpoint.includes("/cancel")) return "Cancelled";
+  if (endpoint.includes("/process")) return "Processed";
+  if (row?.actionType === "CREATE") return "Created";
+  if (row?.actionType === "UPDATE") return "Updated";
+  if (row?.actionType === "DELETE") return "Deleted";
+  return "Changed";
+}
+
+function formatActivitySummary(row) {
+  return `${formatActivityVerb(row)} ${formatActivityResource(row)}`;
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function AdminRoles() {
@@ -104,7 +137,7 @@ export default function AdminRoles() {
         return bookingApi.adminActivityLogs({
           ...baseParams,
           page: 0,
-          size: 3,
+          size: 20,
         });
       }
 
@@ -207,11 +240,12 @@ export default function AdminRoles() {
   const assignableRoles = roles.filter((r) => !assignedRolesForUser.includes(r.name));
   const activityRows = useMemo(() => {
     const rows = activityLogsQuery.data?.content || [];
-    return [...rows].sort((a, b) => {
+    const sorted = rows.filter(isUsefulManagerActivity).sort((a, b) => {
       const byTime = new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
       return activitySortOrder === "asc" ? -byTime : byTime;
     });
-  }, [activityLogsQuery.data, activitySortOrder]);
+    return showOnlyLastThreeActivity ? sorted.slice(0, 3) : sorted;
+  }, [activityLogsQuery.data, activitySortOrder, showOnlyLastThreeActivity]);
 
   // ── Checkbox helpers
   const toggle = (setter, key) =>
@@ -320,7 +354,7 @@ export default function AdminRoles() {
           </label>
           <p className="perm-section-label">Permissions</p>
           <PermissionPicker checked={roleChecked} setChecked={setRoleChecked} />
-          <button className="btn btn-teal" disabled={createRoleMutation.isPending}>
+          <button className="btn btn-teal admin-inline-action" disabled={createRoleMutation.isPending}>
             {createRoleMutation.isPending ? "Creating…" : "Create role"}
           </button>
           {createRoleMutation.isSuccess && <p className="success-msg">✓ Role created.</p>}
@@ -360,7 +394,7 @@ export default function AdminRoles() {
               onChange={(e) => setPermissionForm((c) => ({ ...c, description: e.target.value }))}
             />
           </label>
-          <button className="btn btn-teal" disabled={createPermissionMutation.isPending}>
+          <button className="btn btn-teal admin-inline-action" disabled={createPermissionMutation.isPending}>
             {createPermissionMutation.isPending ? "Creating…" : "Create permission"}
           </button>
           {createPermissionMutation.isSuccess && <p className="success-msg">✓ Permission created.</p>}
@@ -421,7 +455,7 @@ export default function AdminRoles() {
             <p className="muted">Select a role above to edit its permissions.</p>
           )}
           <button
-            className="btn btn-teal"
+            className="btn btn-teal admin-inline-action"
             disabled={replaceRolePermissionsMutation.isPending || !selectedRoleId}
           >
             {replaceRolePermissionsMutation.isPending ? "Saving…" : "Save permissions"}
@@ -548,8 +582,8 @@ export default function AdminRoles() {
 
       {/* ── Row 4: User activity analytics ── */}
       <div className="panel user-role-panel">
-        <h2>User activity analytics</h2>
-        <p className="muted">Tracks write operations (POST, PUT/PATCH, DELETE) for the selected user only.</p>
+        <h2>Manager activity</h2>
+        <p className="muted">Shows useful hotel, room, booking, and payment changes for the selected manager.</p>
         <div className="user-role-fields user-role-fields--single">
           <label>
             User name
@@ -616,9 +650,9 @@ export default function AdminRoles() {
               onChange={(e) => setActivityFilters((c) => ({ ...c, actionType: e.target.value }))}
             >
               <option value="">All actions</option>
-              <option value="CREATE">CREATE</option>
-              <option value="UPDATE">UPDATE</option>
-              <option value="DELETE">DELETE</option>
+              <option value="CREATE">Created</option>
+              <option value="UPDATE">Updated</option>
+              <option value="DELETE">Deleted</option>
             </select>
           </label>
           <label>
@@ -646,7 +680,7 @@ export default function AdminRoles() {
           </label>
         </div>
         {!activityFilters.userId ? (
-          <p className="muted">Select a user first to view their activity history.</p>
+          <p className="muted">Select a manager first to view important activity.</p>
         ) : activityLogsQuery.isLoading ? (
           <p className="muted">Loading activity logs...</p>
         ) : activityRows.length ? (
@@ -654,16 +688,16 @@ export default function AdminRoles() {
             {activityRows.map((row) => (
               <article key={row.id} className="manager-row">
                 <div>
-                  <strong>{row.username} (#{row.userId})</strong>
-                  <span>{row.actionType} {row.resourceType ? `on ${row.resourceType}` : ""}{row.resourceId ? ` (${row.resourceId})` : ""}</span>
+                  <strong>{formatActivitySummary(row)}</strong>
+                  <span>{row.username} (#{row.userId})</span>
                   <span className="muted">{new Date(row.createdAt).toLocaleString()}</span>
                 </div>
-                <span className="role-id">{row.httpMethod}</span>
+                <span className="role-id">{row.actionType}</span>
               </article>
             ))}
           </div>
         ) : (
-          <p className="muted">No activity logs match current filters.</p>
+          <p className="muted">No important manager activity matches current filters.</p>
         )}
       </div>
     </section>
@@ -809,6 +843,16 @@ const styles = `
   display: flex;
   gap: 0.75rem;
   flex-wrap: wrap;
+}
+
+.admin-inline-action {
+  justify-self: start;
+  width: auto;
+}
+
+.user-role-actions .btn {
+  width: auto;
+  flex: 0 0 auto;
 }
 
 /* ── Danger button ── */

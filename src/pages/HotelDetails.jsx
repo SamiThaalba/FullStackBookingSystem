@@ -18,11 +18,16 @@ import {
   PaymentContext,
   getPaymentStrategy,
 } from "../strategies/paymentStrategies";
+import {
+  getCardBrand,
+  loadSavedCards,
+  maskCardNumber,
+  saveSavedCards,
+} from "../utils/paymentCards";
 
 const HotelsGoogleMap = lazy(() => import("../components/HotelsGoogleMap"));
 
 const ASSISTANT_MEMORY_KEY = "quickreserve-ai-memory-v2";
-const SAVED_CARDS_STORAGE_KEY = "quickreserve-saved-cards-v1";
 const DEFAULT_PAYMENT_DRAFT = {
   fullName: "",
   cardNumber: "",
@@ -242,29 +247,8 @@ export default function HotelDetails() {
   }, [dates.checkIn, dates.checkOut, dates.guests, updateBookingUi]);
 
   useEffect(() => {
-    try {
-      const parsed = JSON.parse(localStorage.getItem(SAVED_CARDS_STORAGE_KEY) || "[]");
-      if (Array.isArray(parsed)) {
-        setSavedCards(parsed);
-      }
-    } catch {
-      setSavedCards([]);
-    }
+    setSavedCards(loadSavedCards());
   }, []);
-
-  function maskCardNumber(cardNumber) {
-    const digits = String(cardNumber || "").replace(/\D/g, "");
-    const suffix = digits.slice(-4);
-    return suffix ? `**** **** **** ${suffix}` : "****";
-  }
-
-  function getCardBrand(cardNumber) {
-    const digits = String(cardNumber || "").replace(/\D/g, "");
-    if (digits.startsWith("4")) return "VISA";
-    if (/^5[1-5]/.test(digits)) return "MASTERCARD";
-    if (/^3[47]/.test(digits)) return "AMEX";
-    return "CARD";
-  }
 
   function saveCardIfNeeded() {
     if (paymentMethod !== PAYMENT_METHODS.CARD || !saveCardForNextTime) return;
@@ -282,8 +266,7 @@ export default function HotelDetails() {
     );
     if (alreadyExists) return;
     const next = [normalized, ...savedCards].slice(0, 4);
-    setSavedCards(next);
-    localStorage.setItem(SAVED_CARDS_STORAGE_KEY, JSON.stringify(next));
+    setSavedCards(saveSavedCards(next));
   }
 
   function applySavedCard(card, index) {

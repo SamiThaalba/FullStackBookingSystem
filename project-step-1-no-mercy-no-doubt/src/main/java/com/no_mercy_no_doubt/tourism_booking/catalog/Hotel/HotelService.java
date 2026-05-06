@@ -262,8 +262,9 @@ public class HotelService {
         AppUser user = userRepository.findById(managerId)
                 .orElseThrow(() -> new ResourceNotFoundException("User", managerId));
 
-        if (!roleManagementService.userHasRole(user, "MANAGER")) {
-            throw new BusinessException("Selected user is not a manager.");
+        if (!roleManagementService.userHasManagerPermissions(user)
+                && !roleManagementService.canBypassHotelScope(user)) {
+            throw new BusinessException("Selected user does not have manager permissions.");
         }
     }
 
