@@ -4,9 +4,16 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { bookingApi } from "../api/bookingApi";
 import { useAuth } from "../auth/AuthContext";
 import { useBookingUi } from "../context/BookingUiContext";
-import { matchCityBilingual, parseUserPickIndex, resolveCityBilingual } from "../utils/aiAssistant";
+import {
+  extractAssistantGuestsCount,
+  extractKnownCityFromText,
+  matchCityBilingual,
+  normalizeAssistantDateInput,
+  parseUserPickIndex,
+  resolveCityBilingual,
+} from "../utils/aiAssistant";
 import { money } from "../utils/format";
-import { addDaysIso, isIsoOnOrBefore, tomorrowIso } from "../utils/dates";
+import { addDaysIso, isIsoOnOrBefore } from "../utils/dates";
 
 const ASSISTANT_MEMORY_KEY = "quickreserve-ai-memory-v2";
 const ASSISTANT_AUTO_OPEN_KEY = "quickreserve-ai-auto-open-v1";
@@ -29,6 +36,12 @@ function saveMemory(memory) {
   } catch {
     // noop
   }
+}
+
+function isValidRoomName(name) {
+  if (!name || typeof name !== "string") return false;
+  const n = name.trim().toLowerCase();
+  return n && n !== "room type name is required.";
 }
 
 function isAnyCityIntent(text) {
@@ -83,6 +96,55 @@ function isResetChatIntent(text) {
   );
 }
 
+function isAffirmativeIntent(text) {
+  const value = String(text || "")
+    .toLowerCase()
+    .trim()
+    .replace(/[.!?]+$/g, "")
+    .replace(/\s+/g, " ");
+  return [
+    "yes",
+    "yeah",
+    "yep",
+    "yup",
+    "correct",
+    "right",
+    "sure",
+    "ok",
+    "okay",
+    "yes please",
+    "please",
+    "that's right",
+    "that is right",
+  ].includes(value);
+}
+
+function isNegativeIntent(text) {
+  const value = String(text || "")
+    .toLowerCase()
+    .trim()
+    .replace(/[.!?]+$/g, "")
+    .replace(/\s+/g, " ");
+  return ["no", "nope", "nah", "not that", "wrong", "not correct"].includes(value);
+}
+
+function isCasualGreetingIntent(text) {
+  const value = String(text || "")
+    .toLowerCase()
+    .trim()
+    .replace(/[.!?]+$/g, "")
+    .replace(/\s+/g, " ");
+  if (!value) return false;
+  if (/\b(hotel|book|booking|reserve|room|city|date|guest|stay|check|bethlehem|jerusalem|ramallah|nablus|hebron|gaza)\b/.test(value)) {
+    return false;
+  }
+  return /^(hi|hello|hey|hey there|hello there|yo|good morning|good afternoon|good evening|salam)$/.test(value);
+}
+
+function greetingReply() {
+  return "Hi, I'm here. Tell me what you're looking for, or tap Guide me and I'll walk you through it.";
+}
+
 function isCityQuestion(text) {
   const value = String(text || "").toLowerCase();
   return (
@@ -119,18 +181,7 @@ function shouldShowGuide(text) {
 
 // Converts user-typed "D-M" / "D/M" / "D.M" patterns → "YYYY-MM-DD" using current year.
 function normalizeDateInput(text) {
-  const year = new Date().getFullYear();
-  return String(text || "").replace(
-    /\b(\d{1,2})[\/\-\.](\d{1,2})\b(?![\-\/\.]\d{2,4})/g,
-    (raw, p1, p2) => {
-      const day = Number(p1);
-      const month = Number(p2);
-      if (day >= 1 && day <= 31 && month >= 1 && month <= 12) {
-        return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-      }
-      return raw;
-    },
-  );
+  return normalizeAssistantDateInput(text);
 }
 
 function extractIsoDates(text) {
@@ -140,12 +191,7 @@ function extractIsoDates(text) {
 }
 
 function extractGuestsCount(text) {
-  const t = String(text || "").toLowerCase();
-  const match = t.match(/\b(\d{1,2})\b/);
-  if (!match) return null;
-  const n = Number(match[1]);
-  if (!Number.isFinite(n) || n <= 0 || n > 20) return null;
-  return n;
+  return extractAssistantGuestsCount(text);
 }
 
 function getGuideQuestion(context, confirmDraft) {
@@ -284,6 +330,7 @@ export default function HomeAiAssistant({ cities: _cities } = {}) {
   const [loading, setLoading] = useState(false);
   const [guideEnabled, setGuideEnabled] = useState(false);
   const [confirmDraft, setConfirmDraft] = useState(null);
+  const [pendingCitySuggestion, setPendingCitySuggestion] = useState(null);
   const scrollerRef = useRef(null);
   const inputRef = useRef(null);
   const wasAuthenticatedRef = useRef(Boolean(auth.isAuthenticated));
@@ -302,6 +349,7 @@ export default function HomeAiAssistant({ cities: _cities } = {}) {
       setChat([]);
       setGuideEnabled(false);
       setConfirmDraft(null);
+      setPendingCitySuggestion(null);
       saveMemory({ context: {}, history: [] });
     }
     wasAuthenticatedRef.current = isAuthenticated;
@@ -322,23 +370,31 @@ export default function HomeAiAssistant({ cities: _cities } = {}) {
   }
 
   function startGuidedFlow() {
-    setGuideEnabled(true);
     if (loading) return;
-    const question = getGuideQuestion(context, confirmDraft);
+    const nextContext = {};
+    const question = getGuideQuestion(nextContext, null);
     if (!question) return;
-    const last = chat[chat.length - 1];
-    if (last?.role === "assistant" && String(last?.content || "").trim() === question) return;
-    pushTurn("assistant", question);
+    const nextChat = [{ role: "assistant", content: question }];
+    setGuideEnabled(true);
+    setPendingCitySuggestion(null);
+    setContext(nextContext);
+    setChat(nextChat);
+    setMessage("");
+    setConfirmDraft(null);
+    saveMemory({ context: nextContext, history: nextChat });
+    scrollToBottom();
+    inputRef.current?.focus();
   }
 
   async function prepareBookingFromAction(action, recommendations, userText) {
     const rawCity = action?.city || context?.city;
     const city = resolveCityBilingual(rawCity);
-    let checkIn = action?.checkIn || context?.checkIn || tomorrowIso();
-    let checkOut = action?.checkOut || context?.checkOut || (() => {
-      return addDaysIso(checkIn, 1);
-    })();
-    const guests = Number(action?.guests || context?.guests || 1);
+    let checkIn = action?.checkIn || context?.checkIn || null;
+    let checkOut = action?.checkOut || context?.checkOut || null;
+    const guests = Number(action?.guests || context?.guests || 0);
+    if (!checkIn || !checkOut || guests <= 0) {
+      throw new Error("Before booking, please provide check-in date, check-out date, and number of guests.");
+    }
     if (isIsoOnOrBefore(checkOut, checkIn)) {
       checkOut = addDaysIso(checkIn, 1);
     }
@@ -396,14 +452,19 @@ export default function HomeAiAssistant({ cities: _cities } = {}) {
       bookingApi.getRoomTypes(hotelId),
     ]);
 
-    const room = [...(rooms || [])]
-      .filter((r) => Number(r.capacity || 0) >= guests)
-      .sort((a, b) => Number(a.basePrice || 0) - Number(b.basePrice || 0))[0];
+    const roomTypeId = Number(action?.roomTypeId || context?.selectedRoomTypeId || 0);
+    if (!roomTypeId) {
+      throw new Error("Please choose a room type before I prepare the booking.");
+    }
+    const room = (rooms || [])
+      .filter((r) => isValidRoomName(r?.name))
+      .find((r) => Number(r.id) === roomTypeId);
 
     if (!room) {
-      throw new Error(
-        `I found ${hotelName || hotel?.name || "the hotel"}, but there is no suitable room for ${guests} guest(s).`,
-      );
+      throw new Error("I could not find that room type for this hotel. Please choose one of the listed room types.");
+    }
+    if (Number(room.capacity || 0) < guests) {
+      throw new Error(`The selected room type (${room.name}) supports fewer than ${guests} guest(s). Please choose another room type.`);
     }
 
     const quote = await bookingApi.checkAvailability({
@@ -434,7 +495,7 @@ export default function HomeAiAssistant({ cities: _cities } = {}) {
     if (isResetChatIntent(text)) {
       resetConversation();
       setMessage("");
-      pushTurn("assistant", "Chat reset. You can start again anytime.");
+      pushTurn("assistant", "Chat reset. You can start again anytime.", [], {});
       return;
     }
     if (shouldShowGuide(text)) {
@@ -448,6 +509,38 @@ export default function HomeAiAssistant({ cities: _cities } = {}) {
     setMessage("");
     inputRef.current?.focus();
     const withUser = pushTurn("user", text);
+    if (
+      !guideEnabled &&
+      pendingCitySuggestion &&
+      !context?.city &&
+      !context?.anyCity &&
+      !Number(context?.selectedHotelId || 0)
+    ) {
+      if (isAffirmativeIntent(normalizedText)) {
+        const nextContext = { ...context, city: pendingCitySuggestion, anyCity: false };
+        setPendingCitySuggestion(null);
+        setContext(nextContext);
+        saveMemory({ context: nextContext, history: withUser });
+        navigateWithContext({ navigate, updateBookingUi, ctx: nextContext, fallbackGuests: 1 });
+        pushTurn(
+          "assistant",
+          `City set to ${nextContext.city}. Tell me your check-in date, check-out date, and number of guests.`,
+          withUser,
+          nextContext,
+        );
+        return;
+      }
+      if (isNegativeIntent(normalizedText)) {
+        setPendingCitySuggestion(null);
+        pushTurn("assistant", "No problem. Type the city again, or say: any city.", withUser, context);
+        return;
+      }
+      setPendingCitySuggestion(null);
+    }
+    if (!guideEnabled && isCasualGreetingIntent(normalizedText)) {
+      pushTurn("assistant", greetingReply(), withUser, context);
+      return;
+    }
     setLoading(true);
 
     try {
@@ -459,18 +552,34 @@ export default function HomeAiAssistant({ cities: _cities } = {}) {
 
         // Step 1: city (or any city)
         if (!hasCity) {
-          const any = isAnyCityIntent(normalizedText);
-          if (!any && isUnsureIntent(normalizedText)) {
-            pushTurn(
-              "assistant",
-              "No problem. If you are not sure about city, just say: any city. Then I will show available hotels in Palestine.",
-              withUser,
-              context,
-            );
-            return;
+          if (pendingCitySuggestion) {
+            if (isAffirmativeIntent(normalizedText)) {
+              const resolved = pendingCitySuggestion;
+              const nextContext = { ...context, city: resolved, anyCity: false };
+              setPendingCitySuggestion(null);
+              setContext(nextContext);
+              saveMemory({ context: nextContext, history: withUser });
+              navigateWithContext({ navigate, updateBookingUi, ctx: nextContext, fallbackGuests: 1 });
+
+              pushTurn(
+                "assistant",
+                `Step 1 saved. City: ${resolved}. Step 2: what are your check-in and check-out dates? (YYYY-MM-DD)`,
+                withUser,
+                nextContext,
+              );
+              return;
+            }
+            if (isNegativeIntent(normalizedText)) {
+              setPendingCitySuggestion(null);
+              pushTurn("assistant", "No problem. Type the city again, or say: any city.", withUser, context);
+              return;
+            }
+            setPendingCitySuggestion(null);
           }
+          const any = isAnyCityIntent(normalizedText);
           const cityMatch = any ? { status: "exact", city: "" } : matchCityBilingual(normalizedText);
           if (!any && cityMatch.status === "suggested") {
+            setPendingCitySuggestion(cityMatch.city);
             pushTurn(
               "assistant",
               `I couldn't find "${normalizedText}" as a city in Palestine. Did you mean ${cityMatch.city}?`,
@@ -479,18 +588,15 @@ export default function HomeAiAssistant({ cities: _cities } = {}) {
             );
             return;
           }
-          const resolved = any ? "" : cityMatch.city;
+          const resolved = any ? "" : (cityMatch.city || extractKnownCityFromText(normalizedText) || resolveCityBilingual(normalizedText));
           if (!any && !resolved) {
-            pushTurn(
-              "assistant",
-              `There is no city called "${normalizedText}" in Palestine. Please enter a valid city like Bethlehem, Jerusalem, Ramallah, Nablus, Hebron, or Gaza.`,
-              withUser,
-              context,
-            );
+            setPendingCitySuggestion(null);
+            pushTurn("assistant", getGuideQuestion(context, confirmDraft), withUser, context);
             return;
           }
 
           const nextContext = { ...context, city: resolved || "", anyCity: any };
+          setPendingCitySuggestion(null);
           setContext(nextContext);
           saveMemory({ context: nextContext, history: withUser });
           navigateWithContext({ navigate, updateBookingUi, ctx: nextContext, fallbackGuests: 1 });
@@ -620,7 +726,16 @@ export default function HomeAiAssistant({ cities: _cities } = {}) {
       saveMemory({ context: effectiveContext, history: withUser });
 
       let assistantText = response?.reply || "I processed your request.";
-      if (Array.isArray(response?.missingFields) && response.missingFields.length > 0) {
+      const citySuggestionMatch = String(assistantText || "").match(/Did you mean\s+([^?]+)\?/i);
+      const hasCityValidationReply =
+        Boolean(citySuggestionMatch) ||
+        /there is no city called|couldn't find ".+" as a city/i.test(String(assistantText || ""));
+      if (citySuggestionMatch?.[1]) {
+        setPendingCitySuggestion(citySuggestionMatch[1].trim());
+      } else if (hasCityValidationReply) {
+        setPendingCitySuggestion(null);
+      }
+      if (Array.isArray(response?.missingFields) && response.missingFields.length > 0 && !hasCityValidationReply) {
         const firstMissing = response.missingFields[0];
         if (firstMissing === "checkIn") {
           assistantText = `I found ${response?.recommendations?.length || 0} option(s) in ${nextContext?.city || "that city"}. What is your check-in date?`;
@@ -642,6 +757,47 @@ export default function HomeAiAssistant({ cities: _cities } = {}) {
         };
         if (userMeansAnyCity) actionContext.anyCity = true;
         navigateWithContext({ navigate, updateBookingUi, ctx: actionContext, fallbackGuests: 1 });
+      } else if (response?.action?.type === "ASK_ROOM_SELECTION") {
+        const hotelId = Number(response?.action?.hotelId || effectiveContext?.selectedHotelId || 0);
+        const hasDatesGuests =
+          Boolean(effectiveContext?.checkIn) &&
+          Boolean(effectiveContext?.checkOut) &&
+          Number(effectiveContext?.guests || 0) > 0;
+        if (hotelId > 0) {
+          const roomContext = {
+            ...effectiveContext,
+            selectedHotelId: hotelId,
+            selectedHotelName: response?.action?.hotelName || effectiveContext?.selectedHotelName || null,
+          };
+          setContext(roomContext);
+          saveMemory({ context: roomContext, history: withUser });
+
+          if (hasDatesGuests) {
+            const q = new URLSearchParams();
+            if (roomContext?.city) q.set("city", roomContext.city);
+            q.set("from", roomContext.checkIn);
+            q.set("to", roomContext.checkOut);
+            q.set("guests", String(Number(roomContext.guests || 1)));
+            q.set("ai", "1");
+            updateBookingUi({
+              city: roomContext?.city || "",
+              checkInDate: roomContext.checkIn,
+              checkOutDate: roomContext.checkOut,
+              guests: Number(roomContext.guests || 1),
+            });
+            navigate(`/hotels/${hotelId}?${q.toString()}#room-types`, {
+              state: { intent: { hotelId, fromAssistant: true } },
+            });
+            const rooms = await bookingApi.getRoomTypes(hotelId);
+            const validRooms = (rooms || []).filter((room) => isValidRoomName(room?.name));
+            assistantText =
+              validRooms.length > 0
+                ? `Which room type would you like?\n${validRooms.map((room, idx) => `${idx + 1}) ${room.name} - ${money(room.basePrice)} (capacity ${room.capacity})`).join("\n")}\nReply with room name or number.`
+                : "No room types are available for this hotel.";
+          } else {
+            assistantText = "Great choice. Before room type, please tell me your check-in date, check-out date, and number of guests.";
+          }
+        }
       } else if (response?.action?.type === "PREPARE_BOOKING") {
         const draft = await prepareBookingFromAction(response.action, response.recommendations, text);
         setConfirmDraft(draft);
@@ -752,12 +908,14 @@ export default function HomeAiAssistant({ cities: _cities } = {}) {
     setMessage("");
     setGuideEnabled(false);
     setConfirmDraft(null);
+    setPendingCitySuggestion(null);
     saveMemory({ context: {}, history: [] });
     inputRef.current?.focus();
   }
 
   function clearContext() {
     setContext({});
+    setPendingCitySuggestion(null);
     saveMemory({ context: {}, history: chat });
   }
 

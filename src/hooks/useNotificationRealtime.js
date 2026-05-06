@@ -83,4 +83,3 @@ export function useNotificationRealtime(enabled) {
 }
 
 export const notificationRealtimeEventName = EVENT_NAME;
-
