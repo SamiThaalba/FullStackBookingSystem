@@ -1,6 +1,7 @@
 import { createContext, useContext, useMemo, useState } from "react";
 import { bookingApi } from "../api/bookingApi";
 import { readStoredAuth, writeStoredAuth } from "../api/client";
+import { MANAGER_WORKSPACE_PERMISSIONS, hasAnyPermission } from "./permissions";
 
 const AuthContext = createContext(null);
 
@@ -42,20 +43,23 @@ export function AuthProvider({ children }) {
     setAuth(response);
   }
 
-  const hasPermission = (permission) => user?.permissions?.includes(permission);
+  const hasPermission = (permission) => Boolean(user?.permissions?.includes(permission));
+  const userHasAnyPermission = (permissions) => hasAnyPermission(user, permissions);
+  const isManager = userHasAnyPermission(MANAGER_WORKSPACE_PERMISSIONS);
 
   const value = {
     auth,
     user,
     applyAuthResponse,
     isAuthenticated: Boolean(auth?.accessToken),
-    /** Staff who manage properties (backend uses permissions; this mirrors hotel:update). */
-    isManager: hasPermission("hotel:update"),
+    /** Staff workspace access is permission-based, not tied to one role name. */
+    isManager,
     /** User administration (JWT must include user:manage). */
     isAdmin: hasPermission("user:manage"),
     /** Guest-oriented nav: not a hotel operator. */
-    isCustomer: !hasPermission("hotel:update"),
+    isCustomer: !isManager,
     hasPermission,
+    hasAnyPermission: userHasAnyPermission,
     signIn,
     signUp,
     signOut,

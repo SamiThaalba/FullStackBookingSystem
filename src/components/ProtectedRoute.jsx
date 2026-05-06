@@ -24,11 +24,11 @@ export default function ProtectedRoute({
     return <Navigate to="/" replace />;
   }
 
-  if (requireManager && !auth.hasPermission("hotel:update")) {
+  if (requireManager && !auth.isManager) {
     return <Navigate to="/" replace />;
   }
 
-  if (requireCustomer && auth.hasPermission("hotel:update")) {
+  if (requireCustomer && auth.isManager) {
     return <Navigate to="/dashboard" replace />;
   }
 

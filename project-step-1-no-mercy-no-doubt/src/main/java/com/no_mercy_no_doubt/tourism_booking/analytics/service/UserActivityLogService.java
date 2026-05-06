@@ -11,6 +11,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -49,7 +50,7 @@ public class UserActivityLogService {
     @Transactional(readOnly = true)
     public PageResponse<UserActivityLogResponse> getLogs(Long userId, String actionType, LocalDate fromDate, LocalDate toDate,
                                                          int page, int size) {
-        Pageable pageable = PageRequest.of(page, size);
+        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
 
         Page<UserActivityLog> result = logRepository.findAll((root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();

@@ -82,10 +82,10 @@ export default function Layout() {
 
           <div className="nav-links">
             <NavLink to="/hotels">{t("layout.discover")}</NavLink>
-            {auth.isAuthenticated && auth.hasPermission("booking:view") && !auth.hasPermission("hotel:update") ? (
+            {auth.isAuthenticated && auth.hasPermission("booking:view") && !auth.isManager ? (
               <NavLink to="/my-bookings">{t("layout.myBookings")}</NavLink>
             ) : null}
-            {auth.hasPermission("hotel:update") && <NavLink to="/dashboard">{t("layout.manager")}</NavLink>}
+            {auth.isManager && <NavLink to="/dashboard">{t("layout.manager")}</NavLink>}
             {auth.hasPermission("role:manage") && <NavLink to="/admin/roles">{t("layout.admin")}</NavLink>}
           </div>
 

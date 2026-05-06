@@ -190,6 +190,7 @@ function isAnyCityIntent(text) {
     value.includes("anything") ||
     value.includes("for all") ||
     value.includes("all hotels") ||
+    value.includes("all hotel") ||
     value.includes("lets see all") ||
     value.includes("let's see all") ||
     value.includes("lets see for all") ||
@@ -203,6 +204,22 @@ function isAnyCityIntent(text) {
     value === "anyone" ||
     value.includes("anywhere")
   );
+}
+
+function isBrowseHotelsIntent(text) {
+  const value = String(text || "")
+    .toLowerCase()
+    .trim()
+    .replace(/[.!?]+$/g, "")
+    .replace(/\s+/g, " ");
+  if (!value) return false;
+  if (!/\bhotels?\b/.test(value)) return false;
+  if (/\b(called|named|name is)\b/.test(value)) return false;
+  if (/^(all\s+)?hotels?$/.test(value)) return true;
+
+  const asksToBrowse = /\b(show|list|see|view|browse|display|give|get|find|search)\b/.test(value);
+  const asksForCollection = /\b(all|available|options|every|any)\b/.test(value) || /\bhotels?\s*(please)?$/.test(value);
+  return asksToBrowse && asksForCollection;
 }
 
 function isUnsureIntent(text) {
@@ -1208,6 +1225,64 @@ function BookingAssistantInner({ embedded = false }) {
     return updated;
   }
 
+  async function showHotelsFromBrowseIntent(normalizedText, chatWithUserTurn) {
+    const cityFromText = extractExplicitCity(normalizedText);
+    const contextCity = context?.anyCity ? "" : (context?.city || "");
+    const browseAll = isAnyCityIntent(normalizedText) || (!cityFromText && !contextCity);
+    const city = browseAll ? null : (cityFromText || contextCity);
+    const nextContext = {
+      ...context,
+      city,
+      anyCity: browseAll,
+      selectedHotelId: null,
+      selectedHotelName: null,
+      selectedRoomTypeId: null,
+      selectedRoomTypeName: null,
+      pendingHotelName: null,
+    };
+
+    const params = {
+      city: browseAll ? undefined : city,
+      from: nextContext.checkIn || undefined,
+      to: nextContext.checkOut || undefined,
+      checkInDate: nextContext.checkIn || undefined,
+      checkOutDate: nextContext.checkOut || undefined,
+      guests: Number(nextContext.guests || 0) > 0 ? Number(nextContext.guests) : undefined,
+      page: 0,
+      size: HOTELS_PAGE_SIZE,
+    };
+    const response = await bookingApi.listHotels(params);
+    const options = (response?.content || []).map(toHotelOption).filter((hotel) => hotel.id > 0 && hotel.name);
+
+    const q = new URLSearchParams();
+    if (!browseAll && city) q.set("city", city);
+    if (nextContext.checkIn) q.set("from", nextContext.checkIn);
+    if (nextContext.checkOut) q.set("to", nextContext.checkOut);
+    if (Number(nextContext.guests || 0) > 0) q.set("guests", String(Number(nextContext.guests)));
+
+    updateBookingUi({
+      city: browseAll ? "" : city,
+      checkInDate: nextContext.checkIn || "",
+      checkOutDate: nextContext.checkOut || "",
+      guests: Number(nextContext.guests || 1),
+    });
+    navigate(`/hotels${q.toString() ? `?${q.toString()}` : ""}`);
+
+    setContext(nextContext);
+    setConfirmDraft(null);
+    setHotelOptions(options);
+    setRoomOptions([]);
+    setPendingCitySuggestion(null);
+    saveMemory({ context: nextContext, history: chatWithUserTurn, ui: { guideEnabled } });
+
+    const place = browseAll ? "all cities" : city;
+    const reply =
+      options.length > 0
+        ? `Sure. I found ${options.length} hotel${options.length === 1 ? "" : "s"} for ${place}. Choose one from the options below.`
+        : `I could not find hotels for ${place} right now. Try another city or different filters.`;
+    pushTurn("assistant", reply, chatWithUserTurn, nextContext);
+  }
+
   async function prepareBookingFromAction(action, recommendations, userText) {
     const rawCity = action?.city || context?.city;
     const city = resolveCityBilingual(rawCity);
@@ -1341,11 +1416,8 @@ function BookingAssistantInner({ embedded = false }) {
       return;
     }
     if (shouldShowGuide(text)) {
-      startGuidedFlow();
+      startGuidedFlow({ userText: text });
       setMessage("");
-      const withUser = pushTurn("user", text);
-      const question = getGuideQuestion(context, confirmDraft);
-      if (question) pushTurn("assistant", question, withUser, context);
       return;
     }
     // Normalize shorthand dates ("7-5" → "2026-05-07") before processing or sending to backend.
@@ -1387,6 +1459,11 @@ function BookingAssistantInner({ embedded = false }) {
     setLoading(true);
 
     try {
+      if (isBrowseHotelsIntent(normalizedText)) {
+        await showHotelsFromBrowseIntent(normalizedText, withUser);
+        return;
+      }
+
       // ── Guided flow (local step-by-step; no backend chat) ─────────────────────
       if (guideEnabled) {
         // ── City correction: handle at any stage so the user can always fix their city ──
@@ -2772,15 +2849,13 @@ function BookingAssistantInner({ embedded = false }) {
     sendMessage(room.name);
   }
 
-  function startGuidedFlow() {
+  function startGuidedFlow({ userText = "" } = {}) {
     if (loading) return;
-    const question = getGuideQuestion(context, confirmDraft);
-    if (!question) return;
-    const nextChat = [{ role: "assistant", content: question }];
-    const nextContext = {
-      ...context,
-      mode: "guided",
-    };
+    const nextContext = { mode: "guided" };
+    const question = getGuideQuestion(nextContext, null, systemLang);
+    const nextChat = userText
+      ? [{ role: "user", content: userText }, { role: "assistant", content: question }]
+      : [{ role: "assistant", content: question }];
     if (!embedded) resetAssistantToBottomRight(posRef, setPos);
     setGuideEnabled(true);
     setPendingCitySuggestion(null);
@@ -2793,7 +2868,7 @@ function BookingAssistantInner({ embedded = false }) {
     setSelectedRoomOptionId(null);
     setPickDialog(null);
     setAssistantPickerDismissed(false);
-    saveMemory({ context: nextContext, history: nextChat });
+    saveMemory({ context: nextContext, history: nextChat, ui: { guideEnabled: true } });
     queueMicrotask(() => {
       scrollerRef.current?.scrollTo({ top: scrollerRef.current.scrollHeight, behavior: "smooth" });
       inputRef.current?.focus();
@@ -2929,18 +3004,16 @@ function BookingAssistantInner({ embedded = false }) {
               </div>
             </div>
             <div style={{ display: "flex", gap: 8 }}>
-              {!guideEnabled ? (
-                <button
-                  type="button"
-                  className="assistant-head__newChat"
-                  onClick={startGuidedFlow}
-                  disabled={loading}
-                  aria-label="Guide me"
-                  title="Guide me"
-                >
-                  Guide me
-                </button>
-              ) : null}
+              <button
+                type="button"
+                className="assistant-head__newChat"
+                onClick={() => startGuidedFlow()}
+                disabled={loading}
+                aria-label={guideEnabled ? "Guide again" : "Guide me"}
+                title={guideEnabled ? "Guide again" : "Guide me"}
+              >
+                {guideEnabled ? "Guide again" : "Guide me"}
+              </button>
               <button
                 type="button"
                 className="assistant-head__newChat"
