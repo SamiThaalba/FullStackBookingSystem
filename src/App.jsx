@@ -44,7 +44,7 @@ export default function App() {
         <Route
           path="wishlist"
           element={
-            <ProtectedRoute requireCustomer>
+            <ProtectedRoute>
               <Wishlist />
             </ProtectedRoute>
           }

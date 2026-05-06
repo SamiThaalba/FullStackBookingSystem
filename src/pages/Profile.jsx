@@ -329,13 +329,11 @@ export default function Profile() {
             </div>
           </dl>
 
-          {!isManager ? (
-            <div className="profile-card__footer">
-              <Link className="btn btn-outline" to="/wishlist">
-                {t("profile.wishlistCta")}
-              </Link>
-            </div>
-          ) : null}
+          <div className="profile-card__footer">
+            <Link className="btn btn-outline" to="/wishlist">
+              {t("profile.wishlistCta")}
+            </Link>
+          </div>
         </div>
 
         <div className="panel profile-card profile-card--payments">

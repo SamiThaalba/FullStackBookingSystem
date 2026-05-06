@@ -1128,7 +1128,7 @@ select {
 
 .search-panel-bar {
   position: relative;
-  border: 3px solid var(--gold);
+  border: 3px solid var(--purple);
   border-radius: 18px;
   background: var(--surface);
   box-shadow: var(--shadow);
@@ -2523,27 +2523,29 @@ button.hotel-map-label {
 
 .hotel-list {
   display: grid;
-  gap: 18px;
-  max-width: 760px;
+  gap: 22px;
+  max-width: 940px;
   margin: 0 auto;
 }
 
 .hotel-card {
   display: grid;
-  grid-template-columns: 190px minmax(0, 1fr) auto;
-  gap: 18px;
+  grid-template-columns: minmax(260px, 340px) minmax(0, 1fr) auto;
+  gap: 22px;
   align-items: center;
-  min-height: 150px;
-  padding: 14px;
+  min-height: 230px;
+  padding: 16px;
   border: 1px solid var(--line);
   background: var(--surface);
+  border-radius: 8px;
+  box-shadow: 0 16px 36px rgba(31, 18, 47, 0.08);
 }
 
 .hotel-image,
 .gallery-card {
-  min-height: 125px;
-  aspect-ratio: 4 / 3;
-  border-radius: 4px;
+  min-height: 205px;
+  aspect-ratio: 16 / 11;
+  border-radius: 8px;
   display: grid;
   place-items: center;
   color: #fff;
@@ -2559,6 +2561,11 @@ button.hotel-map-label {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  transition: transform 180ms ease;
+}
+
+.hotel-card:hover .hotel-image img {
+  transform: scale(1.035);
 }
 
 .hotel-summary h3,
@@ -3371,6 +3378,17 @@ button.notif-row--btn:disabled {
 .assistant-stepper__top span {
   font-weight: 700;
   color: color-mix(in srgb, var(--teal) 72%, var(--ink));
+}
+
+.assistant-stepper__top span,
+.assistant-stepper__top small {
+  white-space: nowrap;
+}
+
+.assistant-stepper__top small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .assistant-stepper__bar {
@@ -4693,6 +4711,27 @@ button.notif-row--btn:disabled {
   border-color: color-mix(in srgb, var(--teal) 45%, var(--line));
 }
 .assistant-head__newChat:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.assistant-stepper {
+  min-width: 0;
+}
+
+.assistant-stepper__top {
+  gap: 8px;
+  min-width: 0;
+}
+
+.assistant-stepper__top span {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.assistant-stepper__top small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .assistant-botAvatar {
   width: 24px;

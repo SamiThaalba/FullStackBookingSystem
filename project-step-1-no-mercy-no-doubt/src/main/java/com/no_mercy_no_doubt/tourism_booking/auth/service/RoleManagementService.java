@@ -32,8 +32,6 @@ public class RoleManagementService {
             "room:create",
             "room:update",
             "room:delete",
-            "booking:update",
-            "booking:cancel",
             "analytics:view"
     );
 

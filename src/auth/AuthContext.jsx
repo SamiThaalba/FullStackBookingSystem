@@ -45,7 +45,9 @@ export function AuthProvider({ children }) {
 
   const hasPermission = (permission) => Boolean(user?.permissions?.includes(permission));
   const userHasAnyPermission = (permissions) => hasAnyPermission(user, permissions);
-  const isManager = userHasAnyPermission(MANAGER_WORKSPACE_PERMISSIONS);
+  const hasAdminPermissions = hasPermission("user:manage") || hasPermission("role:manage");
+  const hasManagerWorkspacePermissions = userHasAnyPermission(MANAGER_WORKSPACE_PERMISSIONS);
+  const isManager = hasManagerWorkspacePermissions;
 
   const value = {
     auth,
@@ -55,7 +57,7 @@ export function AuthProvider({ children }) {
     /** Staff workspace access is permission-based, not tied to one role name. */
     isManager,
     /** User administration (JWT must include user:manage). */
-    isAdmin: hasPermission("user:manage"),
+    isAdmin: hasAdminPermissions,
     /** Guest-oriented nav: not a hotel operator. */
     isCustomer: !isManager,
     hasPermission,

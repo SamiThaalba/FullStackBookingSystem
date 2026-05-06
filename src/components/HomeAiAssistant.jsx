@@ -9,11 +9,12 @@ import {
   extractKnownCityFromText,
   matchCityBilingual,
   normalizeAssistantDateInput,
+  parseNaturalDateRange,
   parseUserPickIndex,
   resolveCityBilingual,
 } from "../utils/aiAssistant";
 import { money } from "../utils/format";
-import { addDaysIso, isIsoOnOrBefore } from "../utils/dates";
+import { addDaysIso, isIsoOnOrBefore, todayIso } from "../utils/dates";
 
 const ASSISTANT_MEMORY_KEY = "quickreserve-ai-memory-v2";
 const ASSISTANT_AUTO_OPEN_KEY = "quickreserve-ai-auto-open-v1";
@@ -190,6 +191,20 @@ function extractIsoDates(text) {
   return matches.slice(0, 3);
 }
 
+function resolveCheckInOutFromUserText(text) {
+  const iso = extractIsoDates(text);
+  if (iso.length >= 2) {
+    let [checkIn, checkOut] = iso;
+    if (isIsoOnOrBefore(checkOut, checkIn)) {
+      checkOut = addDaysIso(checkIn, 1);
+    }
+    return { checkIn, checkOut };
+  }
+  const natural = parseNaturalDateRange(text, todayIso);
+  if (natural?.checkIn && natural?.checkOut) return natural;
+  return null;
+}
+
 function extractGuestsCount(text) {
   return extractAssistantGuestsCount(text);
 }
@@ -198,15 +213,15 @@ const GUIDED_FLOW_TOTAL_STEPS = 5;
 
 function getGuideQuestion(context, confirmDraft) {
   if (!context?.city && !context?.anyCity && !Number(context?.selectedHotelId || 0)) {
-    return "Great — step 1: which city do you want to stay in? (Or say: any city)";
+    return "Great - step 1: which city do you want to stay in? (Or say: any city)";
   }
   if (!context?.checkIn || !context?.checkOut || !Number(context?.guests || 0)) {
-    return "Step 2: what are your check-in and check-out dates? (YYYY-MM-DD) and how many guests?";
+    return "Step 2: choose check-in, check-out, and guests. You can type natural dates like today to tomorrow.";
   }
   if (confirmDraft) {
     return "Everything is ready. Please choose a payment method, then confirm booking.";
   }
-  return "Great. I’ll open results — choose a hotel from the list.";
+  return "Great. I will open results - choose a hotel from the list.";
 }
 
 function getFlowStep(context, confirmDraft) {
@@ -601,38 +616,46 @@ export default function HomeAiAssistant({ cities: _cities } = {}) {
 
           pushTurn(
             "assistant",
-            `Step 1 saved. ${any ? "Any city is fine." : `City: ${resolved}.`} Step 2: what are your check-in and check-out dates? (YYYY-MM-DD)`,
+            `Step 1 saved. ${any ? "Any city is fine." : `City: ${resolved}.`} Step 2: choose check-in, check-out, and guests.`,
             withUser,
             nextContext,
           );
           return;
         }
 
-        // Step 2: dates
-        if (!hasDates) {
-          const dates = extractIsoDates(normalizedText);
-          if (dates.length < 2) {
+        // Step 2: dates + guests
+        if (!hasDates || !hasGuests) {
+          const resolvedDates = resolveCheckInOutFromUserText(normalizedText);
+          const guestsFromText = extractGuestsCount(normalizedText);
+          const checkIn = resolvedDates?.checkIn || context.checkIn;
+          const checkOut = resolvedDates?.checkOut || context.checkOut;
+          const guests = guestsFromText || Number(context.guests || 0);
+
+          if (!checkIn || !checkOut) {
             pushTurn(
               "assistant",
-              "Please provide check-in and check-out dates (YYYY-MM-DD). Example: 2026-05-10 to 2026-05-13",
+              "Please provide check-in and check-out dates. You can say: today to tomorrow, Monday to Sunday, or 2026-05-10 to 2026-05-13.",
               withUser,
               context,
             );
             return;
           }
-          let [checkIn, checkOut] = dates;
-          if (new Date(checkOut) <= new Date(checkIn)) {
-            const d = new Date(checkIn);
-            d.setDate(d.getDate() + 1);
-            checkOut = d.toISOString().slice(0, 10);
+
+          if (!guests) {
+            const partial = { ...context, checkIn, checkOut };
+            setContext(partial);
+            saveMemory({ context: partial, history: withUser });
+            navigateWithContext({ navigate, updateBookingUi, ctx: partial, fallbackGuests: 1 });
+            pushTurn("assistant", "Dates saved. How many guests will stay?", withUser, partial);
+            return;
           }
 
-          const nextContext = { ...context, checkIn, checkOut };
+          const nextContext = { ...context, checkIn, checkOut, guests };
           setContext(nextContext);
           saveMemory({ context: nextContext, history: withUser });
-          navigateWithContext({ navigate, updateBookingUi, ctx: nextContext, fallbackGuests: 1 });
+          navigateWithContext({ navigate, updateBookingUi, ctx: nextContext, fallbackGuests: guests });
 
-          pushTurn("assistant", "Step 2 saved. Step 3: how many guests will stay?", withUser, nextContext);
+          pushTurn("assistant", "Step 2 saved. Step 3: choose a hotel from the results list, or tell me the hotel name.", withUser, nextContext);
           return;
         }
 

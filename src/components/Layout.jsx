@@ -86,6 +86,7 @@ export default function Layout() {
             {auth.isAuthenticated && auth.hasPermission("booking:view") && !auth.isManager ? (
               <NavLink to="/my-bookings">{t("layout.myBookings")}</NavLink>
             ) : null}
+            {auth.isAuthenticated ? <NavLink to="/wishlist">Wishlist</NavLink> : null}
             {auth.isManager && <NavLink to="/dashboard">{t("layout.manager")}</NavLink>}
             {auth.hasPermission("role:manage") && <NavLink to="/admin/roles">{t("layout.admin")}</NavLink>}
           </div>
