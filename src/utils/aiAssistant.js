@@ -1,3 +1,5 @@
+import { addDaysIso, todayIso } from "./dates.js";
+
 const CITY_ALIASES = [
   { en: "Ramallah", ar: "رام الله" },
   { en: "Jerusalem", ar: "القدس" },
@@ -79,16 +81,30 @@ function findClosestCityAlias(input) {
   return best.score <= threshold ? best.city : null;
 }
 
-export function resolveCityBilingual(input) {
+export function resolveKnownCityBilingual(input) {
   const n = normalize(input);
   if (!n) return "";
   for (const row of CITY_ALIASES) {
     if (normalize(row.en) === n) return row.en;
     if (normalize(row.ar) === n) return row.en;
   }
-  const fuzzy = findClosestCityAlias(input);
-  if (fuzzy) return fuzzy;
-  return String(input).trim();
+  return findClosestCityAlias(input) || "";
+}
+
+export function resolveCityBilingual(input) {
+  return resolveKnownCityBilingual(input) || String(input || "").trim();
+}
+
+export function extractKnownCityFromText(text) {
+  const words = normalize(text).split(/\s+/).filter(Boolean);
+  for (let size = Math.min(2, words.length); size >= 1; size -= 1) {
+    for (let i = 0; i <= words.length - size; i += 1) {
+      const candidate = words.slice(i, i + size).join(" ");
+      const resolved = resolveKnownCityBilingual(candidate);
+      if (resolved) return resolved;
+    }
+  }
+  return "";
 }
 
 export function resolveCountryBilingual(input) {
@@ -101,11 +117,20 @@ export function resolveCountryBilingual(input) {
   return String(input).trim();
 }
 
+function looksLikeGuestOrDateText(text) {
+  const raw = String(text || "").toLowerCase();
+  const t = normalize(raw);
+  return (
+    /\b(guest|guests|people|person|persons|traveler|travelers|traveller|travellers|pax|date|dates|today|tomorrow|check in|check out|night|nights)\b/.test(t) ||
+    /\b\d{4}-\d{2}-\d{2}\b/.test(raw) ||
+    /\b\d{1,2}[\/\-.]\d{1,2}([\/\-.]\d{2,4})?\b/.test(raw)
+  );
+}
+
 export function parseUserPickIndex(text) {
   const t = normalize(text);
-  if (!t) return null;
+  if (!t || looksLikeGuestOrDateText(text)) return null;
 
-  // English ordinals / numbers
   const english = [
     ["first", 1],
     ["1st", 1],
@@ -128,7 +153,6 @@ export function parseUserPickIndex(text) {
     if (r.test(t)) return n - 1;
   }
 
-  // Arabic ordinals / numbers (common)
   const arabic = [
     ["الأول", 1],
     ["اول", 1],
@@ -155,7 +179,7 @@ export function parseUserPickIndex(text) {
     if (t.includes(normalize(token))) return n - 1;
   }
 
-  const match = t.match(/\b(\d{1,2})\b/);
+  const match = t.match(/\b(?:option|number|#)?\s*(\d{1,2})\b/);
   if (match) {
     const num = Number(match[1]);
     if (Number.isFinite(num) && num >= 1 && num <= 20) return num - 1;
@@ -164,13 +188,64 @@ export function parseUserPickIndex(text) {
   return null;
 }
 
+function resolveDayMonth(first, second) {
+  if (first > 12 && second <= 12) return { day: first, month: second };
+  if (second > 12 && first <= 12) return { day: second, month: first };
+  return { day: first, month: second };
+}
+
+function isValidMonthDay(month, day) {
+  if (month < 1 || month > 12 || day < 1 || day > 31) return false;
+  const d = new Date(2024, month - 1, day);
+  return d.getMonth() === month - 1 && d.getDate() === day;
+}
+
+export function normalizeAssistantDateInput(text) {
+  return String(text || "").replace(
+    /\b(\d{1,2})[\/\-.](\d{1,2})(?:[\/\-.](\d{2,4}))?\b/g,
+    (raw, p1, p2, p3) => {
+      const first = Number(p1);
+      const second = Number(p2);
+      const { day, month } = resolveDayMonth(first, second);
+      if (!isValidMonthDay(month, day)) return raw;
+
+      let year = p3 ? Number(p3) : new Date().getFullYear();
+      if (year < 100) year += 2000;
+
+      let iso = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+      if (!p3 && iso < todayIso()) {
+        iso = addDaysIso(`${year + 1}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`, 0);
+      }
+      return iso || raw;
+    },
+  );
+}
+
+export function extractAssistantGuestsCount(text) {
+  const t = String(text || "").toLowerCase();
+  const explicit = t.match(/\b(\d{1,2})\s*(?:guests?|people|persons?|travelers?|travellers?|pax)\b/);
+  if (explicit) {
+    const n = Number(explicit[1]);
+    return Number.isFinite(n) && n > 0 && n <= 20 ? n : null;
+  }
+
+  const withoutDates = t
+    .replace(/\b\d{4}-\d{2}-\d{2}\b/g, " ")
+    .replace(/\b\d{1,2}[\/\-.]\d{1,2}([\/\-.]\d{2,4})?\b/g, " ");
+  const phrased = withoutDates.match(/\b(?:for|party of|group of|we are|we're|were)\s+(\d{1,2})\b/);
+  const bare = withoutDates.trim().match(/^(\d{1,2})$/);
+  const match = phrased || bare;
+  if (!match) return null;
+
+  const n = Number(match[1]);
+  return Number.isFinite(n) && n > 0 && n <= 20 ? n : null;
+}
+
 export function extendBilingualCityRows(rows) {
   const out = [...(rows ?? [])];
   const seen = new Set(out.map((r) => `${normalize(r?.name)}|${normalize(r?.countryName)}`));
 
   for (const { en, ar } of CITY_ALIASES) {
-    // Add Arabic alias as a searchable option (same country unknown).
-    // If an English entry exists already, keep it; we add the Arabic variant too for matching.
     const keyEn = `${normalize(en)}|`;
     const keyAr = `${normalize(ar)}|`;
     if (!seen.has(keyEn)) {
@@ -198,4 +273,3 @@ export function extendBilingualCityRows(rows) {
 
   return out.filter((r) => (r?.name ?? "").trim());
 }
-

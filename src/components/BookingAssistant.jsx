@@ -3,9 +3,16 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { bookingApi, buildBookingCreatePayload } from "../api/bookingApi";
 import { useAuth } from "../auth/AuthContext";
 import { useBookingUi } from "../context/BookingUiContext";
-import { parseUserPickIndex, resolveCityBilingual } from "../utils/aiAssistant";
+import {
+  extractAssistantGuestsCount,
+  extractKnownCityFromText,
+  normalizeAssistantDateInput,
+  parseUserPickIndex,
+  resolveCityBilingual,
+  resolveKnownCityBilingual,
+} from "../utils/aiAssistant";
 import { money } from "../utils/format";
-import { todayIso, tomorrowIso } from "../utils/dates";
+import { addDaysIso, isIsoOnOrBefore, todayIso, tomorrowIso } from "../utils/dates";
 
 const ASSISTANT_MEMORY_KEY = "quickreserve-ai-memory-v2";
 const ASSISTANT_POSITION_KEY = "quickreserve-ai-position-v1";
@@ -199,7 +206,7 @@ function extractCityCorrection(text) {
   const value = String(text || "").trim();
   const match = value.match(/^(?:i mean|no[, ]*i mean)\s+([a-zA-Z\u0600-\u06FF\s-]+)$/i);
   if (!match?.[1]) return "";
-  return resolveCityBilingual(match[1].trim());
+  return resolveKnownCityBilingual(match[1].trim());
 }
 
 function getStrictCurrentStep(context, confirmDraft) {
@@ -272,15 +279,7 @@ function humanizeError(err) {
 // current calendar year, so the backend always receives unambiguous ISO dates.
 // Patterns that already contain a 4-digit year (e.g. "2026-05-07") are left alone.
 function normalizeDateInput(text) {
-  const year = new Date().getFullYear();
-  return text.replace(/\b(\d{1,2})[\/\-\.](\d{1,2})\b(?![\-\/\.]\d{2,4})/g, (raw, p1, p2) => {
-    const day = Number(p1);
-    const month = Number(p2);
-    if (day >= 1 && day <= 31 && month >= 1 && month <= 12) {
-      return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-    }
-    return raw;
-  });
+  return normalizeAssistantDateInput(text);
 }
 
 // ─── "Another hotel" intent ───────────────────────────────────────────────────
@@ -300,8 +299,8 @@ function extractExplicitCity(text) {
   const candidates = [...words];
   for (let i = 0; i < words.length - 1; i++) candidates.push(`${words[i]} ${words[i + 1]}`);
   for (const c of candidates) {
-    const resolved = resolveCityBilingual(c);
-    if (resolved && resolved !== c) return resolved;
+    const resolved = resolveKnownCityBilingual(c);
+    if (resolved) return resolved;
   }
   return "";
 }
@@ -337,12 +336,7 @@ function extractIsoDates(text) {
 }
 
 function extractGuestsCount(text) {
-  const t = String(text || "").toLowerCase();
-  const match = t.match(/\b(\d{1,2})\b/);
-  if (!match) return null;
-  const n = Number(match[1]);
-  if (!Number.isFinite(n) || n <= 0 || n > 20) return null;
-  return n;
+  return extractAssistantGuestsCount(text);
 }
 
 async function fetchHotelOptionsForContext(ctx) {
@@ -739,10 +733,8 @@ export default function BookingAssistant({ embedded = false }) {
     if (!checkIn || !checkOut || guests <= 0) {
       throw new Error("Before choosing room type, please provide check-in, check-out, and number of guests.");
     }
-    if (new Date(checkOut) <= new Date(checkIn)) {
-      const d = new Date(checkIn);
-      d.setDate(d.getDate() + 1);
-      checkOut = d.toISOString().slice(0, 10);
+    if (isIsoOnOrBefore(checkOut, checkIn)) {
+      checkOut = addDaysIso(checkIn, 1);
     }
 
     let hotelId = action?.hotelId || context?.selectedHotelId || null;
@@ -818,17 +810,13 @@ export default function BookingAssistant({ embedded = false }) {
     ]);
     const validRooms = (rooms || []).filter((r) => isValidRoomName(r?.name));
     const roomTypeId = Number(action?.roomTypeId || context?.selectedRoomTypeId || 0);
+    if (!roomTypeId) {
+      throw new Error("Please choose a room type before I prepare the booking.");
+    }
     let room = null;
-    if (roomTypeId > 0) {
-      room = validRooms.find((r) => Number(r.id) === roomTypeId) || null;
-    }
+    room = validRooms.find((r) => Number(r.id) === roomTypeId) || null;
     if (!room) {
-      room = [...validRooms]
-        .filter((r) => Number(r.capacity || 0) >= guests)
-        .sort((a, b) => Number(a.basePrice || 0) - Number(b.basePrice || 0))[0] || null;
-    }
-    if (!room) {
-      throw new Error(`I found ${hotelName || hotel?.name || "the hotel"}, but no room can host ${guests} guest(s).`);
+      throw new Error("I could not find that room type for this hotel. Please choose one of the listed room types.");
     }
     if (Number(room.capacity || 0) < guests) {
       throw new Error(`The selected room type (${room.name}) supports fewer than ${guests} guest(s). Please choose another room type.`);
@@ -914,9 +902,9 @@ export default function BookingAssistant({ embedded = false }) {
         // Step 1: city (or any city)
         if (!hasCity && !hasHotel) {
           const any = isAnyCityIntent(normalizedText);
-          const resolved = any ? "" : resolveCityBilingual(normalizedText);
+          const resolved = any ? "" : (resolveKnownCityBilingual(normalizedText) || extractKnownCityFromText(normalizedText));
           if (!any && !resolved) {
-            pushTurn("assistant", getGuideQuestion(context, confirmDraft), withUser, context);
+            pushTurn("assistant", "I did not recognize that city. Please choose a supported Palestine city, or say: any city.", withUser, context);
             return;
           }
 
@@ -1101,6 +1089,8 @@ export default function BookingAssistant({ embedded = false }) {
         if (hasCity && hasDatesGuests) {
           const hotelsResp = await bookingApi.listHotels({
             city: nextContext.anyCity ? undefined : nextContext.city,
+            from: nextContext.checkIn,
+            to: nextContext.checkOut,
             checkInDate: nextContext.checkIn,
             checkOutDate: nextContext.checkOut,
             guests: Number(nextContext.guests),
@@ -1319,6 +1309,8 @@ export default function BookingAssistant({ embedded = false }) {
           const guests = Number(response?.action?.guests || nextContext?.guests || 1);
           const uiHotelsResp = await bookingApi.listHotels({
             city,
+            from: checkIn,
+            to: checkOut,
             checkInDate: checkIn,
             checkOutDate: checkOut,
             guests,
@@ -1557,6 +1549,8 @@ export default function BookingAssistant({ embedded = false }) {
       } else if (strictStep === 4) {
         const hotelsResp = await bookingApi.listHotels({
           city: effectiveContext?.anyCity ? undefined : effectiveContext?.city,
+          from: effectiveContext?.checkIn,
+          to: effectiveContext?.checkOut,
           checkInDate: effectiveContext?.checkIn,
           checkOutDate: effectiveContext?.checkOut,
           guests: Number(effectiveContext?.guests || 1),
