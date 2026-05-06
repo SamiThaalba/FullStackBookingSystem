@@ -29,14 +29,14 @@ export function loadSavedCards() {
   try {
     const parsed = JSON.parse(localStorage.getItem(SAVED_CARDS_STORAGE_KEY) || "[]");
     if (!Array.isArray(parsed)) return [];
-    return parsed.map(normalizeSavedCard).filter(Boolean).slice(0, 4);
+    return parsed.map(normalizeSavedCard).filter(Boolean);
   } catch {
     return [];
   }
 }
 
 export function saveSavedCards(cards) {
-  const normalized = Array.isArray(cards) ? cards.map(normalizeSavedCard).filter(Boolean).slice(0, 4) : [];
+  const normalized = Array.isArray(cards) ? cards.map(normalizeSavedCard).filter(Boolean) : [];
   localStorage.setItem(SAVED_CARDS_STORAGE_KEY, JSON.stringify(normalized));
   return normalized;
 }

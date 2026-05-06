@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { FaCreditCard, FaPencilAlt, FaPlus, FaSave, FaTimes, FaTrashAlt } from "react-icons/fa";
+import { FaCreditCard, FaExchangeAlt, FaPencilAlt, FaPlus, FaSave, FaTimes, FaTrashAlt } from "react-icons/fa";
 import { useAuth } from "../auth/AuthContext";
 import { bookingApi } from "../api/bookingApi";
 import { getAvatarsBucket, getSupabase } from "../lib/supabase";
@@ -43,6 +43,7 @@ export default function Profile() {
   const [message, setMessage] = useState(null);
   const [error, setError] = useState(null);
   const [savedCards, setSavedCards] = useState([]);
+  const [activeSavedCardIndex, setActiveSavedCardIndex] = useState(0);
   const [paymentFormOpen, setPaymentFormOpen] = useState(false);
   const [editingCardIndex, setEditingCardIndex] = useState(null);
   const [paymentForm, setPaymentForm] = useState(EMPTY_PAYMENT_FORM);
@@ -52,6 +53,13 @@ export default function Profile() {
   useEffect(() => {
     setSavedCards(loadSavedCards());
   }, []);
+
+  useEffect(() => {
+    setActiveSavedCardIndex((current) => {
+      if (!savedCards.length) return 0;
+      return Math.min(current, savedCards.length - 1);
+    });
+  }, [savedCards.length]);
 
   function cancelPaymentForm() {
     setPaymentFormOpen(false);
@@ -63,6 +71,12 @@ export default function Profile() {
   function removeSavedCard(indexToRemove) {
     const next = saveSavedCards(savedCards.filter((_, index) => index !== indexToRemove));
     setSavedCards(next);
+    setActiveSavedCardIndex((current) => {
+      if (!next.length) return 0;
+      if (current === indexToRemove) return Math.min(current, next.length - 1);
+      if (current > indexToRemove) return current - 1;
+      return current;
+    });
     setPaymentMessage("Payment method removed.");
     if (editingCardIndex === indexToRemove) cancelPaymentForm();
     if (editingCardIndex != null && editingCardIndex > indexToRemove) {
@@ -82,6 +96,7 @@ export default function Profile() {
   }
 
   function openEditPaymentForm(card, index) {
+    setActiveSavedCardIndex(index);
     setEditingCardIndex(index);
     setPaymentForm({
       fullName: card.fullName || "",
@@ -153,8 +168,16 @@ export default function Profile() {
       next.unshift(normalized);
     }
     setSavedCards(saveSavedCards(next));
+    setActiveSavedCardIndex(editingCardIndex != null ? editingCardIndex : 0);
     setPaymentMessage(editingCardIndex != null ? "Payment method updated." : "Payment method added.");
     cancelPaymentForm();
+  }
+
+  function swapSavedCard() {
+    setActiveSavedCardIndex((current) => {
+      if (savedCards.length < 2) return current;
+      return (current + 1) % savedCards.length;
+    });
   }
 
   async function handleFileChange(e) {
@@ -225,6 +248,15 @@ export default function Profile() {
       setBusy(false);
     }
   }
+
+  const activeSavedCard = savedCards.length ? savedCards[activeSavedCardIndex] : null;
+  const stackedSavedCards = savedCards
+    .map((card, index) => ({
+      card,
+      index,
+      stackIndex: (index - activeSavedCardIndex + savedCards.length) % savedCards.length,
+    }))
+    .filter(({ stackIndex }) => stackIndex < Math.min(savedCards.length, 3));
 
   return (
     <section className="container section profile-page">
@@ -333,11 +365,38 @@ export default function Profile() {
               </label>
               <p className="profile-payment-section-title">Saved cards</p>
               {savedCards.length ? (
-                <div className="profile-saved-card-grid">
-                  {savedCards.map((card, index) => {
+                <div className="profile-saved-card-stack">
+                  <div className="profile-saved-card-toolbar">
+                    <span>
+                      Card {activeSavedCardIndex + 1} of {savedCards.length}
+                    </span>
+                    {savedCards.length > 1 ? (
+                      <button type="button" className="btn btn-small btn-outline" onClick={swapSavedCard}>
+                        <FaExchangeAlt aria-hidden />
+                        Swap card
+                      </button>
+                    ) : null}
+                  </div>
+
+                  <div className="profile-saved-card-stage" aria-live="polite">
+                    {stackedSavedCards.map(({ card, index, stackIndex }) => {
                     const brand = getCardBrand(card.cardNumber);
+                    const stackX = stackIndex * 10;
+                    const stackY = 34 - stackIndex * 14;
                     return (
-                      <article className="profile-saved-card" key={`${card.cardNumber}-${card.expiry}-${index}`}>
+                      <article
+                        className={`profile-saved-card profile-saved-card--stacked${stackIndex === 0 ? " is-active" : ""}`}
+                        key={`${card.cardNumber}-${card.expiry}-${index}`}
+                        aria-hidden={stackIndex !== 0}
+                        aria-label={stackIndex === 0 ? `Saved card ${activeSavedCardIndex + 1} of ${savedCards.length}` : undefined}
+                        style={{
+                          "--stack-x": `${stackX}px`,
+                          "--stack-y": `${stackY}px`,
+                          "--stack-scale": `${1 - stackIndex * 0.025}`,
+                          "--stack-opacity": `${1 - stackIndex * 0.14}`,
+                          "--stack-z": `${10 - stackIndex}`,
+                        }}
+                      >
                         <div className="profile-saved-card__preview">
                           <div className="profile-saved-card__top">
                             <span className="profile-saved-card__chip" aria-hidden />
@@ -356,19 +415,27 @@ export default function Profile() {
                           </div>
                           <small className="profile-saved-card__type">{brand} debit</small>
                         </div>
-                        <div className="profile-payment-method__actions">
-                          <button type="button" className="btn btn-small btn-outline" onClick={() => openEditPaymentForm(card, index)}>
-                            <FaPencilAlt aria-hidden />
-                            Edit
-                          </button>
-                          <button type="button" className="btn btn-small btn-outline" onClick={() => removeSavedCard(index)}>
-                            <FaTrashAlt aria-hidden />
-                            Remove
-                          </button>
-                        </div>
                       </article>
                     );
                   })}
+                  </div>
+
+                  {activeSavedCard ? (
+                    <div className="profile-payment-method__actions profile-saved-card-stack__actions">
+                      <button
+                        type="button"
+                        className="btn btn-small btn-outline"
+                        onClick={() => openEditPaymentForm(activeSavedCard, activeSavedCardIndex)}
+                      >
+                        <FaPencilAlt aria-hidden />
+                        Edit
+                      </button>
+                      <button type="button" className="btn btn-small btn-outline" onClick={() => removeSavedCard(activeSavedCardIndex)}>
+                        <FaTrashAlt aria-hidden />
+                        Remove
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
               ) : (
                 <div className="profile-payment-empty">

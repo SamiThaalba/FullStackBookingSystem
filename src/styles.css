@@ -701,10 +701,56 @@ select {
   justify-items: start;
 }
 
+.profile-saved-card-stack {
+  width: min(100%, 500px);
+  display: grid;
+  gap: 12px;
+  justify-items: start;
+}
+
+.profile-saved-card-toolbar {
+  width: min(100%, 488px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.profile-saved-card-toolbar span {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.profile-saved-card-stage {
+  position: relative;
+  width: min(100%, 488px);
+  aspect-ratio: 1.45 / 1;
+  isolation: isolate;
+  overflow: visible;
+}
+
 .profile-saved-card {
   width: min(100%, 460px);
   display: grid;
   gap: 10px;
+}
+
+.profile-saved-card--stacked {
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: calc(100% - 28px);
+  max-width: 460px;
+  z-index: var(--stack-z);
+  opacity: var(--stack-opacity);
+  transform: translate(var(--stack-x), var(--stack-y)) scale(var(--stack-scale));
+  transform-origin: top left;
+  pointer-events: none;
+  transition: transform 160ms ease, opacity 160ms ease;
+}
+
+.profile-saved-card--stacked.is-active {
+  pointer-events: auto;
 }
 
 .profile-saved-card__preview {
@@ -765,6 +811,45 @@ select {
 
 .profile-saved-card .profile-payment-method__actions {
   grid-column: auto;
+}
+
+.profile-saved-card-stack__actions {
+  justify-content: flex-start;
+}
+
+.hotel-payment-card-stack {
+  width: min(100%, 500px);
+  margin: 0 auto;
+}
+
+.hotel-payment-card-stage {
+  margin: 0 auto;
+}
+
+.hotel-payment-card-stage.is-muted {
+  filter: saturate(0.45) brightness(0.92);
+}
+
+.hotel-payment-saved-card-button {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.hotel-payment-saved-card-button:disabled {
+  cursor: not-allowed;
+}
+
+.hotel-payment-saved-card-button .profile-saved-card__preview {
+  border: 1px solid rgba(125, 211, 252, 0.42);
+}
+
+.hotel-payment-saved-card-button.is-active .profile-saved-card__preview {
+  box-shadow: 0 0 0 2px rgba(125, 211, 252, 0.92), 0 16px 34px rgba(8, 25, 52, 0.42);
 }
 
 .profile-payment-method,
