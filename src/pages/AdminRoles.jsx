@@ -58,6 +58,10 @@ export default function AdminRoles() {
   const [selectedUser, setSelectedUser] = useState(null);
   const [assignRoleId, setAssignRoleId] = useState("");
   const [removeRoleId, setRemoveRoleId] = useState("");
+  const [activityUserSearch, setActivityUserSearch] = useState("");
+  const [selectedActivityUser, setSelectedActivityUser] = useState(null);
+  const [showOnlyLastThreeActivity, setShowOnlyLastThreeActivity] = useState(true);
+  const [activitySortOrder, setActivitySortOrder] = useState("desc");
   const [activityFilters, setActivityFilters] = useState({
     userId: "",
     actionType: "",
@@ -79,17 +83,50 @@ export default function AdminRoles() {
     queryFn: () => bookingApi.adminUsersSearch(userSearch),
     enabled: userSearch.trim().length >= 2,
   });
+  const activityUsersSearchQuery = useQuery({
+    queryKey: ["admin-users-search-analytics", activityUserSearch],
+    queryFn: () => bookingApi.adminUsersSearch(activityUserSearch),
+    enabled: activityUserSearch.trim().length >= 2,
+  });
   const activityLogsQuery = useQuery({
-    queryKey: ["admin-activity-logs", activityFilters],
-    queryFn: () =>
-      bookingApi.adminActivityLogs({
+    queryKey: ["admin-activity-logs", activityFilters, showOnlyLastThreeActivity],
+    enabled: Boolean(activityFilters.userId),
+    queryFn: async () => {
+      const baseParams = {
         userId: activityFilters.userId || undefined,
         actionType: activityFilters.actionType || undefined,
         fromDate: activityFilters.fromDate || undefined,
         toDate: activityFilters.toDate || undefined,
-        page: 0,
-        size: 20,
-      }),
+      };
+
+      // Optional compact mode for selected user.
+      if (showOnlyLastThreeActivity) {
+        return bookingApi.adminActivityLogs({
+          ...baseParams,
+          page: 0,
+          size: 3,
+        });
+      }
+
+      // Full mode for selected user: fetch all pages for that user.
+      const pageSize = 50;
+      let page = 0;
+      let totalPages = 1;
+      const combined = [];
+      do {
+        const response = await bookingApi.adminActivityLogs({
+          ...baseParams,
+          page,
+          size: pageSize,
+        });
+        const rows = Array.isArray(response?.content) ? response.content : [];
+        combined.push(...rows);
+        totalPages = Number(response?.totalPages ?? 1);
+        page += 1;
+      } while (page < totalPages);
+
+      return { content: combined };
+    },
   });
 
   const roles       = rolesQuery.data       || [];
@@ -165,9 +202,16 @@ export default function AdminRoles() {
     activityLogsQuery.error?.message;
 
   const searchedUsers = usersSearchQuery.data || [];
+  const activitySearchedUsers = activityUsersSearchQuery.data || [];
   const assignedRolesForUser = selectedUser?.roles ? Array.from(selectedUser.roles) : [];
   const assignableRoles = roles.filter((r) => !assignedRolesForUser.includes(r.name));
-  const activityRows = activityLogsQuery.data?.content || [];
+  const activityRows = useMemo(() => {
+    const rows = activityLogsQuery.data?.content || [];
+    return [...rows].sort((a, b) => {
+      const byTime = new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      return activitySortOrder === "asc" ? -byTime : byTime;
+    });
+  }, [activityLogsQuery.data, activitySortOrder]);
 
   // ── Checkbox helpers
   const toggle = (setter, key) =>
@@ -505,16 +549,66 @@ export default function AdminRoles() {
       {/* ── Row 4: User activity analytics ── */}
       <div className="panel user-role-panel">
         <h2>User activity analytics</h2>
-        <p className="muted">Tracks actions from users with manager-level permissions.</p>
-        <div className="user-role-fields">
+        <p className="muted">Tracks write operations (POST, PUT/PATCH, DELETE) for the selected user only.</p>
+        <div className="user-role-fields user-role-fields--single">
           <label>
-            User ID
+            User name
             <input
-              value={activityFilters.userId}
-              onChange={(e) => setActivityFilters((c) => ({ ...c, userId: e.target.value }))}
-              placeholder="Optional"
+              value={activityUserSearch}
+              onChange={(e) => {
+                const next = e.target.value;
+                setActivityUserSearch(next);
+                setSelectedActivityUser(null);
+                setActivityFilters((c) => ({ ...c, userId: "" }));
+              }}
+              placeholder="Type at least 2 letters..."
             />
           </label>
+        </div>
+        {activityUserSearch.trim().length >= 2 && (
+          <div className="manager-list" style={{ marginBottom: "1rem" }}>
+            {activityUsersSearchQuery.isLoading ? (
+              <p className="muted">Searching users...</p>
+            ) : activitySearchedUsers.length ? (
+              activitySearchedUsers.map((u) => (
+                <article key={u.id} className="manager-row">
+                  <div>
+                    <strong>{u.username}</strong>
+                    <span>{u.email}</span>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-small btn-outline"
+                    onClick={() => {
+                      setSelectedActivityUser(u);
+                      setActivityUserSearch(u.username);
+                      setActivityFilters((c) => ({ ...c, userId: String(u.id) }));
+                    }}
+                  >
+                    Select
+                  </button>
+                </article>
+              ))
+            ) : (
+              <p className="muted">No matching users found.</p>
+            )}
+          </div>
+        )}
+        {selectedActivityUser ? (
+          <p className="muted" style={{ marginBottom: "0.75rem" }}>
+            Selected user: <strong>{selectedActivityUser.username}</strong> (#{selectedActivityUser.id})
+          </p>
+        ) : null}
+        <div className="user-role-actions" style={{ marginBottom: "0.75rem" }}>
+          <button
+            type="button"
+            className={`btn btn-small ${showOnlyLastThreeActivity ? "btn-teal" : "btn-outline"}`}
+            onClick={() => setShowOnlyLastThreeActivity((prev) => !prev)}
+          >
+            {showOnlyLastThreeActivity ? "Showing last 3 changes" : "Show only last 3 changes"}
+          </button>
+        </div>
+        <div className="user-role-fields">
           <label>
             Action
             <select
@@ -525,7 +619,13 @@ export default function AdminRoles() {
               <option value="CREATE">CREATE</option>
               <option value="UPDATE">UPDATE</option>
               <option value="DELETE">DELETE</option>
-              <option value="VIEW">VIEW</option>
+            </select>
+          </label>
+          <label>
+            Sort by date/time
+            <select value={activitySortOrder} onChange={(e) => setActivitySortOrder(e.target.value)}>
+              <option value="desc">Newest first</option>
+              <option value="asc">Newest last</option>
             </select>
           </label>
           <label>
@@ -545,7 +645,9 @@ export default function AdminRoles() {
             />
           </label>
         </div>
-        {activityLogsQuery.isLoading ? (
+        {!activityFilters.userId ? (
+          <p className="muted">Select a user first to view their activity history.</p>
+        ) : activityLogsQuery.isLoading ? (
           <p className="muted">Loading activity logs...</p>
         ) : activityRows.length ? (
           <div className="manager-list">

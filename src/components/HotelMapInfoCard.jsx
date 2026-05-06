@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { FaBed, FaBookmark, FaCoffee, FaDirections, FaRegStar, FaStar, FaStarHalfAlt, FaWifi } from "react-icons/fa";
+import { FaBed, FaCoffee, FaDirections, FaHeart, FaRegHeart, FaRegStar, FaStar, FaStarHalfAlt, FaWifi } from "react-icons/fa";
 import { useAuth } from "../auth/AuthContext";
 import { useHotelWishlistToggle } from "../hooks/useHotelWishlistToggle";
 import { money } from "../utils/format";
@@ -40,7 +40,7 @@ function StarRow({ rating }) {
 export default function HotelMapInfoCard({ hotel, onClose, detailBookingQuery = "" }) {
   const { t } = useTranslation();
   const auth = useAuth();
-  const canSave = auth.isAuthenticated && auth.hasPermission("wishlist:manage");
+  const canSave = auth.isAuthenticated;
   const { isInWishlist, toggleMutation } = useHotelWishlistToggle(hotel, canSave);
 
   const lat = Number(hotel?.latitude);
@@ -120,7 +120,7 @@ export default function HotelMapInfoCard({ hotel, onClose, detailBookingQuery = 
                 aria-label={isInWishlist ? t("hotelCard.removeFromFav") : t("hotelCard.addToFav")}
                 aria-pressed={isInWishlist}
               >
-                <FaBookmark size={18} />
+                {isInWishlist ? <FaHeart size={18} /> : <FaRegHeart size={18} />}
               </button>
             ) : null}
           </div>
@@ -148,8 +148,8 @@ export default function HotelMapInfoCard({ hotel, onClose, detailBookingQuery = 
         </ul>
 
         <Link className="btn btn-teal hotel-map-info-card__cta" to={detailsPath}>
+          {t("hotels.mapInfoGoToHotel")}
           <FaBed size={18} aria-hidden />
-          {t("hotels.mapInfoCheckAvailability")}
         </Link>
       </div>
     </div>

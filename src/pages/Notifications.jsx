@@ -9,28 +9,25 @@ export default function Notifications() {
   const notificationsQuery = useQuery({
     queryKey: ["notifications"],
     queryFn: bookingApi.notifications,
-    refetchInterval: 12_000,
-    refetchOnWindowFocus: true,
-  });
-
-  const unreadCountQuery = useQuery({
-    queryKey: ["notifications-unread-count"],
-    queryFn: bookingApi.unreadNotificationCount,
-    refetchInterval: 12_000,
-    refetchOnWindowFocus: true,
-    staleTime: 4_000,
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
 
   const markReadMutation = useMutation({
     mutationFn: bookingApi.markNotificationRead,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["notifications"] });
-      queryClient.invalidateQueries({ queryKey: ["notifications-unread-count"] });
+    onSuccess: (_, id) => {
+      queryClient.setQueryData(["notifications"], (prev) => {
+        if (!Array.isArray(prev)) return prev;
+        return prev.map((n) =>
+          Number(n?.id) === Number(id) ? { ...n, read: true } : n,
+        );
+      });
     },
   });
 
   const notifications = notificationsQuery.data || [];
-  const unreadCount = unreadCountQuery.data?.unreadCount ?? 0;
+  const unreadCount = notifications.filter((n) => !n.read).length;
 
   return (
     <section className="container section">
@@ -40,9 +37,7 @@ export default function Notifications() {
       </div>
 
       <Alert type="error">
-        {notificationsQuery.error?.message ||
-          unreadCountQuery.error?.message ||
-          markReadMutation.error?.message}
+        {notificationsQuery.error?.message || markReadMutation.error?.message}
       </Alert>
 
       <p className="muted" style={{ marginBottom: "16px" }}>

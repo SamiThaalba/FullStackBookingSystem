@@ -19,6 +19,7 @@ public class RoomTypeResponse {
     private Long id;
     private String name;
     private String description;
+    private String imageUrl;
     private int capacity;
     private int inventoryCount;
     private BigDecimal basePrice;

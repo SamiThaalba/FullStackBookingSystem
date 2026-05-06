@@ -1,30 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { bookingApi } from "../api/bookingApi";
+import { notificationRealtimeEventName } from "../hooks/useNotificationRealtime";
 
 /**
- * Slide-down toast when a new in-app notification appears (poll-driven).
+ * Slide-down toast when a new in-app notification arrives (WebSocket push).
  * Skips the first fetch after login and does not show while on /notifications.
  */
 export default function NotificationSlideIn({ enabled }) {
   const { t, i18n } = useTranslation();
   const location = useLocation();
-  const lastMaxIdRef = useRef(0);
   const dismissedIdsRef = useRef(new Set());
   const [toast, setToast] = useState(null);
   const [isOpen, setIsOpen] = useState(false);
-
-  const notificationsQuery = useQuery({
-    queryKey: ["notifications"],
-    queryFn: bookingApi.notifications,
-    enabled,
-    refetchInterval: 8_000,
-    refetchIntervalInBackground: true,
-    refetchOnWindowFocus: true,
-    staleTime: 4_000,
-  });
 
   const dismissToast = useCallback((id) => {
     dismissedIdsRef.current.add(id);
@@ -36,38 +24,24 @@ export default function NotificationSlideIn({ enabled }) {
 
   useEffect(() => {
     if (!enabled) {
-      lastMaxIdRef.current = 0;
       dismissedIdsRef.current.clear();
       setToast(null);
       setIsOpen(false);
       return;
     }
-    if (!notificationsQuery.isSuccess || location.pathname === "/notifications") {
-      return;
+    if (location.pathname === "/notifications") return;
+
+    function onNewNotification(e) {
+      const n = e?.detail;
+      if (!n || location.pathname === "/notifications") return;
+      if (n.read) return;
+      if (dismissedIdsRef.current.has(n.id)) return;
+      setToast(n);
     }
 
-    const list = notificationsQuery.data ?? [];
-    const ids = list.map((n) => n.id).filter((id) => id != null);
-    if (!ids.length) return;
-
-    const maxId = Math.max(...ids);
-    if (lastMaxIdRef.current === 0) {
-      lastMaxIdRef.current = maxId;
-      return;
-    }
-
-    if (maxId > lastMaxIdRef.current) {
-      const newbie = list.find((n) => n.id === maxId);
-      lastMaxIdRef.current = maxId;
-      if (
-        newbie &&
-        !newbie.read &&
-        !dismissedIdsRef.current.has(newbie.id)
-      ) {
-        setToast(newbie);
-      }
-    }
-  }, [enabled, notificationsQuery.data, location.pathname, notificationsQuery.isSuccess]);
+    window.addEventListener(notificationRealtimeEventName, onNewNotification);
+    return () => window.removeEventListener(notificationRealtimeEventName, onNewNotification);
+  }, [enabled, location.pathname]);
 
   useEffect(() => {
     if (!toast) {

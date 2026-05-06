@@ -11,6 +11,8 @@ import com.no_mercy_no_doubt.tourism_booking.catalog.Hotel.HotelResponse;
 import com.no_mercy_no_doubt.tourism_booking.catalog.Hotel.HotelService;
 import com.no_mercy_no_doubt.tourism_booking.catalog.RoomType.RoomType;
 import com.no_mercy_no_doubt.tourism_booking.catalog.RoomType.RoomTypeRepository;
+import com.no_mercy_no_doubt.tourism_booking.catalog.geography.City;
+import com.no_mercy_no_doubt.tourism_booking.catalog.geography.CityRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
@@ -44,6 +46,9 @@ public class ConversationalAssistantService {
             Pattern.CASE_INSENSITIVE);
     private static final Pattern ORDINAL_PICK_PATTERN =
             Pattern.compile("\\b(\\d{1,2})(?:st|nd|rd|th)?\\b", Pattern.CASE_INSENSITIVE);
+    private static final Pattern PURE_GREETING_PATTERN = Pattern.compile(
+            "^(hi|hello|hey|hey there|hello there|yo|good morning|good afternoon|good evening|salam)[.!?]*$",
+            Pattern.CASE_INSENSITIVE);
     private static final List<String> KNOWN_CITY_NAMES = List.of(
             "ramallah",
             "jerusalem",
@@ -60,28 +65,56 @@ public class ConversationalAssistantService {
             "khan yunis",
             "rafah"
     );
+    private static final List<String> UNSURE_CITY_TOKENS = List.of(
+            "idk", "i dont know", "i don't know", "not sure", "unsure", "whatever"
+    );
 
     private final GroqClientService groqClientService;
     private final RecommendationService recommendationService;
     private final HotelRepository hotelRepository;
     private final HotelService hotelService;
     private final RoomTypeRepository roomTypeRepository;
+    private final CityRepository cityRepository;
     private final ObjectMapper objectMapper;
 
     public AssistantChatResponse chat(AssistantChatRequest request) {
+        String userText = normalizeUserMessageForNlp(request.getMessage());
         AssistantContext context = request.getContext() == null ? new AssistantContext() : request.getContext();
         String previousCity = context.getCity();
         String previousCheckIn = context.getCheckIn();
         String previousCheckOut = context.getCheckOut();
         Integer previousGuests = context.getGuests();
         Boolean previousAnyCity = context.getAnyCity();
+        String invalidCityInput = null;
+        String suggestedCityName = null;
 
-        if (userMeansAnyCity(request.getMessage())) {
+        if (isPureGreeting(userText) && isEmptyBookingContext(context)) {
+            return AssistantChatResponse.builder()
+                    .reply("Hi, I'm here. Tell me what you're looking for, or tap Guide me and I'll walk you through it.")
+                    .intent("other")
+                    .context(context)
+                    .missingFields(List.of())
+                    .action(AssistantActionPlan.builder().type("NONE").build())
+                    .recommendations(List.of())
+                    .build();
+        }
+
+        if (userMeansAnyCity(userText)) {
             context.setAnyCity(true);
             context.setCity(null);
         }
+        if (userIsUnsureAboutCity(userText) && isBlank(context.getCity()) && context.getSelectedHotelId() == null) {
+            return AssistantChatResponse.builder()
+                    .reply("No problem. If city does not matter, say: any city. Or tell me one city in Palestine, like Bethlehem or Ramallah.")
+                    .intent("booking")
+                    .context(context)
+                    .missingFields(List.of("city"))
+                    .action(AssistantActionPlan.builder().type("ASK_MISSING").build())
+                    .recommendations(List.of())
+                    .build();
+        }
 
-        JsonNode llmJson = parseAssistantJson(callAssistantLlm(request, context));
+        JsonNode llmJson = parseAssistantJson(callAssistantLlm(request, context, userText));
         String intent = textNode(llmJson, "intent", "other");
         if (boolNode(llmJson, "reset", false)) {
             context = new AssistantContext();
@@ -92,9 +125,23 @@ public class ConversationalAssistantService {
         if (userMeansAnyCity(extractedCity)) {
             context.setAnyCity(true);
             context.setCity(null);
-        } else if (!isBlank(extractedCity) && looksLikeKnownCity(extractedCity)) {
-            context.setAnyCity(false);
-            context.setCity(extractedCity.trim());
+        } else if (!isBlank(extractedCity)) {
+            CityResolution cityResolution = resolveCityInput(extractedCity);
+            if (cityResolution.status() == CityResolutionStatus.EXACT) {
+                context.setAnyCity(false);
+                context.setCity(cityResolution.canonicalCity());
+            } else if (cityResolution.status() == CityResolutionStatus.SUGGESTED) {
+                context.setAnyCity(false);
+                context.setCity(null);
+                invalidCityInput = extractedCity.trim();
+                suggestedCityName = cityResolution.canonicalCity();
+            } else {
+                context.setAnyCity(false);
+                context.setCity(null);
+                invalidCityInput = extractedCity.trim();
+            }
+        } else if (!Boolean.TRUE.equals(context.getAnyCity())) {
+            context.setCity(firstNonBlank(extractedCity, context.getCity()));
         }
         context.setCheckIn(firstNonBlank(normalizeDateSlot(textNode(slots, "checkIn", null)), context.getCheckIn()));
         context.setCheckOut(firstNonBlank(normalizeDateSlot(textNode(slots, "checkOut", null)), context.getCheckOut()));
@@ -120,9 +167,9 @@ public class ConversationalAssistantService {
             context.setSelectedRoomTypeId(null);
             context.setSelectedRoomTypeName(null);
         }
-        applyNaturalDateFallback(request.getMessage(), context);
-        boolean hasGuestToken = applyHeuristicGuestFallback(request.getMessage(), context);
-        sanitizeGuestsIfDateDigitNoise(request.getMessage(), context);
+        applyNaturalDateFallback(userText, context);
+        boolean hasGuestToken = applyHeuristicGuestFallback(userText, context);
+        sanitizeGuestsIfDateDigitNoise(userText, context);
 
         if (("other".equals(intent) || "follow_up".equals(intent))
                 && "booking".equalsIgnoreCase(context.getMode())) {
@@ -150,6 +197,7 @@ public class ConversationalAssistantService {
 
         HotelSelectionResult selectionResult = resolveHotelSelection(
                 request.getMessage(),
+                userText,
                 requestedHotelName,
                 recommendations,
                 context
@@ -166,6 +214,7 @@ public class ConversationalAssistantService {
         List<RoomType> roomTypes = loadRoomTypes(context.getSelectedHotelId());
         RoomSelectionResult roomSelectionResult = resolveRoomSelection(
                 request.getMessage(),
+                userText,
                 requestedRoomTypeName,
                 roomTypes,
                 context
@@ -179,6 +228,9 @@ public class ConversationalAssistantService {
         }
 
         List<String> missing = missingFieldsForIntent(intent, context, recommendations);
+        if (!isBlank(invalidCityInput) && !missing.contains("city")) {
+            missing.add(0, "city");
+        }
         if (missing.contains("hotelSelection")) {
             context.setMode("selecting_hotel");
         } else if (missing.contains("roomSelection")) {
@@ -229,6 +281,11 @@ public class ConversationalAssistantService {
                 reply = "Which room type would you like?\n" + renderRoomTypeOptions(roomTypes);
             }
         }
+        if (!isBlank(suggestedCityName)) {
+            reply = "I couldn't find \"" + invalidCityInput + "\" as a city in Palestine. Did you mean " + suggestedCityName + "?";
+        } else if (!isBlank(invalidCityInput)) {
+            reply = "There is no city called \"" + invalidCityInput + "\" in Palestine. Please enter a valid city, or say: any city.";
+        }
 
         context.setCurrentStep(resolveCurrentStep(intent, context, missing));
 
@@ -262,12 +319,16 @@ public class ConversationalAssistantService {
         return "PAYMENT";
     }
 
-    private String callAssistantLlm(AssistantChatRequest request, AssistantContext context) {
+    private String callAssistantLlm(AssistantChatRequest request, AssistantContext context, String normalizedMessage) {
         String systemPrompt = """
                 You are a conversational hotel assistant.
                 Return ONLY valid JSON.
                 No markdown, no explanation outside JSON.
                 You must use previous context and history.
+                Be typo-tolerant and intent-tolerant:
+                - Understand misspellings like "tomorro", "tmrw", "behlehem", "ramala".
+                - If user is unsure (idk/not sure), ask a helpful follow-up instead of failing.
+                - If user gives a partial hotel name, treat it as a hotel-search/selection intent.
                 Detect intent and extract slots from the user's latest message.
                 Supported intents: search, booking, filter, follow_up, reset, other.
                 Awareness rules:
@@ -308,7 +369,7 @@ public class ConversationalAssistantService {
         for (AssistantTurn turn : trimHistory(request.getHistory(), 8)) {
             userPrompt.append(turn.getRole()).append(": ").append(turn.getContent()).append("\n");
         }
-        userPrompt.append("\nLatest user message:\n").append(request.getMessage());
+        userPrompt.append("\nLatest user message (normalized for typos):\n").append(normalizedMessage);
         return groqClientService.chat(systemPrompt, userPrompt.toString());
     }
 
@@ -473,6 +534,25 @@ public class ConversationalAssistantService {
 
     private static boolean isBlank(String value) {
         return value == null || value.isBlank();
+    }
+
+    private boolean isPureGreeting(String text) {
+        if (text == null || text.isBlank()) return false;
+        return PURE_GREETING_PATTERN.matcher(text.trim().replaceAll("\\s+", " ")).matches();
+    }
+
+    private boolean isEmptyBookingContext(AssistantContext context) {
+        if (context == null) return true;
+        return isBlank(context.getCity())
+                && !Boolean.TRUE.equals(context.getAnyCity())
+                && isBlank(context.getCheckIn())
+                && isBlank(context.getCheckOut())
+                && context.getGuests() == null
+                && context.getSelectedHotelId() == null
+                && context.getSelectedRoomTypeId() == null
+                && isBlank(context.getPendingHotelName())
+                && isBlank(context.getSelectedHotelName())
+                && isBlank(context.getSelectedRoomTypeName());
     }
 
     private boolean userMeansAnyCity(String text) {
@@ -667,6 +747,7 @@ public class ConversationalAssistantService {
     }
 
     private HotelSelectionResult resolveHotelSelection(String message,
+                                                       String normalizedMessage,
                                                        String requestedHotelNameFromSlot,
                                                        List<HotelRecommendationResponse> recommendations,
                                                        AssistantContext context) {
@@ -685,7 +766,7 @@ public class ConversationalAssistantService {
             }
         }
 
-        Integer pickedIndex = parsePickIndex(message);
+        Integer pickedIndex = parsePickIndex(normalizedMessage);
         if (!looksLikeGuestsOrDateMessage(message)
                 && shouldInterpretAsHotelChoice(message, context)
                 && pickedIndex != null
@@ -752,9 +833,13 @@ public class ConversationalAssistantService {
         }
         Map<String, Integer> named = Map.of(
                 "first", 1,
+                "one", 1,
                 "second", 2,
+                "two", 2,
                 "third", 3,
+                "three", 3,
                 "fourth", 4,
+                "four", 4,
                 "fifth", 5
         );
         for (Map.Entry<String, Integer> entry : named.entrySet()) {
@@ -917,6 +1002,7 @@ public class ConversationalAssistantService {
     }
 
     private RoomSelectionResult resolveRoomSelection(String message,
+                                                     String normalizedMessage,
                                                      String requestedRoomTypeFromSlot,
                                                      List<RoomType> roomTypes,
                                                      AssistantContext context) {
@@ -934,8 +1020,8 @@ public class ConversationalAssistantService {
             }
         }
 
-        Integer pickedIndex = parsePickIndex(message);
-        if (!looksLikeGuestsOrDateMessage(message) && pickedIndex != null && pickedIndex >= 0 && pickedIndex < roomTypes.size()) {
+        Integer pickedIndex = parsePickIndex(normalizedMessage);
+        if (!looksLikeGuestsOrDateMessage(normalizedMessage) && pickedIndex != null && pickedIndex >= 0 && pickedIndex < roomTypes.size()) {
             return RoomSelectionResult.selected(roomTypes.get(pickedIndex));
         }
 
@@ -1057,7 +1143,7 @@ public class ConversationalAssistantService {
         LocalDate parsedCheckIn = parseDateIsoSafe(context.getCheckIn());
         LocalDate parsedCheckOut = parseDateIsoSafe(context.getCheckOut());
 
-        String normalized = message.trim().toLowerCase(Locale.ROOT);
+        String normalized = normalizeCommonTypos(message.trim().toLowerCase(Locale.ROOT));
         boolean messageHasDateSignal = hasDateSignal(normalized);
 
         // Handles phrases like "tomorrow to sunday" / "today to friday".
@@ -1238,7 +1324,7 @@ public class ConversationalAssistantService {
 
     private LocalDate resolveTokenToDate(String token, LocalDate reference) {
         if (token == null) return null;
-        String t = token.trim().toLowerCase(Locale.ROOT);
+        String t = normalizeCommonTypos(token.trim().toLowerCase(Locale.ROOT));
         if (t.isEmpty()) return null;
 
         if (t.contains("today")) return LocalDate.now();
@@ -1268,6 +1354,132 @@ public class ConversationalAssistantService {
             return LocalDate.parse(t);
         } catch (DateTimeParseException ex) {
             return null;
+        }
+    }
+
+    private String normalizeUserMessageForNlp(String raw) {
+        String text = raw == null ? "" : raw.trim();
+        if (text.isEmpty()) return text;
+        text = normalizeCommonTypos(text.toLowerCase(Locale.ROOT));
+        text = text
+                .replaceAll("\\bpls\\b", "please")
+                .replaceAll("\\bthx\\b", "thanks")
+                .replaceAll("\\bcuz\\b", "because")
+                .replaceAll("\\bnd\\b", "and")
+                .replaceAll("\\btil\\b", "until")
+                .replaceAll("\\btill\\b", "until");
+        return text.replaceAll("\\s+", " ").trim();
+    }
+
+    private boolean userIsUnsureAboutCity(String text) {
+        String value = normalizeText(text).replaceAll("\\s+", " ").trim();
+        if (value.isEmpty()) return false;
+        return UNSURE_CITY_TOKENS.stream().anyMatch(value::contains);
+    }
+
+    private CityResolution resolveCityInput(String rawInput) {
+        String normalizedInput = normalizeCompact(rawInput);
+        if (normalizedInput.isBlank()) {
+            return CityResolution.none();
+        }
+
+        List<City> allCities;
+        try {
+            allCities = cityRepository.findAllOrderByCountryAndName();
+        } catch (Exception ignored) {
+            return CityResolution.none();
+        }
+        if (allCities.isEmpty()) return CityResolution.none();
+
+        List<City> palestineCities = allCities.stream()
+                .filter(c -> c.getCountry() != null && "palestine".equalsIgnoreCase(String.valueOf(c.getCountry().getName())))
+                .toList();
+        List<City> scope = palestineCities.isEmpty() ? allCities : palestineCities;
+
+        for (City city : scope) {
+            if (normalizeCompact(city.getName()).equals(normalizedInput)) {
+                return CityResolution.exact(city.getName());
+            }
+        }
+
+        City best = null;
+        int bestDistance = Integer.MAX_VALUE;
+        double bestRatio = 1.0;
+        for (City city : scope) {
+            String candidate = normalizeCompact(city.getName());
+            if (candidate.isBlank()) continue;
+            if (candidate.charAt(0) != normalizedInput.charAt(0)) continue;
+            int distance = levenshteinDistance(normalizedInput, candidate);
+            double ratio = (double) distance / Math.max(normalizedInput.length(), candidate.length());
+            if (distance < bestDistance || (distance == bestDistance && ratio < bestRatio)) {
+                bestDistance = distance;
+                bestRatio = ratio;
+                best = city;
+            }
+        }
+        if (best == null) return CityResolution.none();
+
+        int threshold = Math.max(2, (int) Math.floor(normalizedInput.length() * 0.34));
+        if (bestDistance <= threshold && bestRatio <= 0.34) {
+            return CityResolution.suggested(best.getName());
+        }
+        return CityResolution.none();
+    }
+
+    private String normalizeCompact(String value) {
+        if (value == null) return "";
+        return value
+                .trim()
+                .toLowerCase(Locale.ROOT)
+                .replaceAll("[^\\p{L}\\p{N}]", "");
+    }
+
+    private int levenshteinDistance(String a, String b) {
+        if (Objects.equals(a, b)) return 0;
+        if (a == null || a.isBlank()) return b == null ? 0 : b.length();
+        if (b == null || b.isBlank()) return a.length();
+
+        int[][] dp = new int[a.length() + 1][b.length() + 1];
+        for (int i = 0; i <= a.length(); i++) dp[i][0] = i;
+        for (int j = 0; j <= b.length(); j++) dp[0][j] = j;
+        for (int i = 1; i <= a.length(); i++) {
+            for (int j = 1; j <= b.length(); j++) {
+                int cost = a.charAt(i - 1) == b.charAt(j - 1) ? 0 : 1;
+                dp[i][j] = Math.min(
+                        Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1),
+                        dp[i - 1][j - 1] + cost
+                );
+            }
+        }
+        return dp[a.length()][b.length()];
+    }
+
+    private String normalizeCommonTypos(String value) {
+        if (value == null || value.isBlank()) return "";
+        return value
+                .replaceAll("\\btomorow\\b", "tomorrow")
+                .replaceAll("\\btommorow\\b", "tomorrow")
+                .replaceAll("\\btomorroww\\b", "tomorrow")
+                .replaceAll("\\btmrw\\b", "tomorrow");
+    }
+
+    private enum CityResolutionStatus {
+        EXACT,
+        SUGGESTED,
+        NONE
+    }
+
+    private record CityResolution(CityResolutionStatus status, String canonicalCity) {
+        static CityResolution exact(String city) {
+            return new CityResolution(CityResolutionStatus.EXACT, city);
+        }
+
+        static CityResolution suggested(String city) {
+            return new CityResolution(CityResolutionStatus.SUGGESTED, city);
+        }
+
+        static CityResolution none() {
+            return new CityResolution(CityResolutionStatus.NONE, null);
         }
     }
 }

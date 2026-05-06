@@ -60,11 +60,14 @@ export default function SearchPanel({
   }, []);
 
   useEffect(() => {
+    const guestsFromUi = Math.max(1, Number(bookingUi.guests || 1));
     setForm((current) => ({
       ...current,
       city: bookingUi.city || current.city,
       from: bookingUi.checkInDate || current.from,
       to: bookingUi.checkOutDate || current.to,
+      adults: guestsFromUi,
+      children: 0,
     }));
     console.info("[BookingUi] SearchPanel received shared state", bookingUi);
   }, [bookingUi.city, bookingUi.checkInDate, bookingUi.checkOutDate, bookingUi.guests]);
@@ -316,14 +319,14 @@ function normalizeCityRows(cities, cityOptions) {
 function buildCountryGroups(rows) {
   const map = new Map();
   for (const { name, countryName } of rows) {
-    const key = countryName || "__other__";
+    // Never show an "Other" group: if country is missing, skip the row.
+    if (!countryName) continue;
+    const key = countryName;
     if (!map.has(key)) map.set(key, new Set());
     map.get(key).add(name);
   }
   return [...map.entries()]
     .sort(([a], [b]) => {
-      if (a === "__other__") return 1;
-      if (b === "__other__") return -1;
       return a.localeCompare(b);
     })
     .map(([countryKey, names]) => ({
@@ -342,8 +345,7 @@ function filterCountryGroups(groups, searchText) {
   if (!q) return groups;
   const out = [];
   for (const g of groups) {
-    const isOther = g.countryKey === "__other__";
-    const countryMatch = !isOther && g.countryKey.toLowerCase().includes(q);
+    const countryMatch = g.countryKey.toLowerCase().includes(q);
     if (countryMatch) {
       out.push({ countryKey: g.countryKey, cities: [...g.cities] });
       continue;

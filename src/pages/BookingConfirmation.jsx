@@ -13,8 +13,8 @@ export default function BookingConfirmation() {
         <p className="eyebrow">Booking confirmed</p>
         <h1>Sleep easy. Your stay is booked.</h1>
         <p>
-          Your booking reference is <strong>#{booking?.id || bookingId}</strong>. A mock payment
-          was processed successfully to complete your booking.
+          Your booking reference is <strong>#{booking?.id || bookingId}</strong>. Payment was processed
+          successfully to complete your booking.
         </p>
         {payment?.id ? (
           <p className="muted">

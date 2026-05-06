@@ -24,8 +24,7 @@ export default function Login() {
     setLoading(true);
     try {
       await auth.signIn(form);
-      queryClient.invalidateQueries({ queryKey: ["notifications-unread-count"] });
-      queryClient.invalidateQueries({ queryKey: ["notifications"] });
+      queryClient.setQueryData(["notifications"], []);
       const resumeFrom = location.state?.from || "/hotels";
       const intent = location.state?.intent || readBookingIntent();
       clearBookingIntent();

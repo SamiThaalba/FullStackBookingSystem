@@ -1,16 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
-import { bookingApi, buildBookingCreatePayload } from "../api/bookingApi";
+import { bookingApi } from "../api/bookingApi";
 import { useAuth } from "../auth/AuthContext";
 import { useBookingUi } from "../context/BookingUiContext";
 import {
   extractAssistantGuestsCount,
   extractKnownCityFromText,
+  matchCityBilingual,
   normalizeAssistantDateInput,
   parseUserPickIndex,
   resolveCityBilingual,
-  resolveKnownCityBilingual,
 } from "../utils/aiAssistant";
 import { money } from "../utils/format";
 import { addDaysIso, isIsoOnOrBefore } from "../utils/dates";
@@ -65,6 +65,84 @@ function isAnyCityIntent(text) {
     value === "anyone" ||
     value.includes("anywhere")
   );
+}
+
+function isUnsureIntent(text) {
+  const value = String(text || "").toLowerCase().trim();
+  if (!value) return false;
+  const compact = value.replace(/\s+/g, "");
+  return (
+    value === "idk" ||
+    value === "i dont know" ||
+    value === "i don't know" ||
+    value === "not sure" ||
+    value === "unsure" ||
+    value === "whatever" ||
+    compact === "dontknow" ||
+    compact === "idontknow"
+  );
+}
+
+function isResetChatIntent(text) {
+  const value = String(text || "").toLowerCase().trim();
+  if (!value) return false;
+  return (
+    value === "clear" ||
+    value === "clear chat" ||
+    value === "reset" ||
+    value === "reset chat" ||
+    value === "new chat" ||
+    value === "restart chat"
+  );
+}
+
+function isAffirmativeIntent(text) {
+  const value = String(text || "")
+    .toLowerCase()
+    .trim()
+    .replace(/[.!?]+$/g, "")
+    .replace(/\s+/g, " ");
+  return [
+    "yes",
+    "yeah",
+    "yep",
+    "yup",
+    "correct",
+    "right",
+    "sure",
+    "ok",
+    "okay",
+    "yes please",
+    "please",
+    "that's right",
+    "that is right",
+  ].includes(value);
+}
+
+function isNegativeIntent(text) {
+  const value = String(text || "")
+    .toLowerCase()
+    .trim()
+    .replace(/[.!?]+$/g, "")
+    .replace(/\s+/g, " ");
+  return ["no", "nope", "nah", "not that", "wrong", "not correct"].includes(value);
+}
+
+function isCasualGreetingIntent(text) {
+  const value = String(text || "")
+    .toLowerCase()
+    .trim()
+    .replace(/[.!?]+$/g, "")
+    .replace(/\s+/g, " ");
+  if (!value) return false;
+  if (/\b(hotel|book|booking|reserve|room|city|date|guest|stay|check|bethlehem|jerusalem|ramallah|nablus|hebron|gaza)\b/.test(value)) {
+    return false;
+  }
+  return /^(hi|hello|hey|hey there|hello there|yo|good morning|good afternoon|good evening|salam)$/.test(value);
+}
+
+function greetingReply() {
+  return "Hi, I'm here. Tell me what you're looking for, or tap Guide me and I'll walk you through it.";
 }
 
 function isCityQuestion(text) {
@@ -252,6 +330,7 @@ export default function HomeAiAssistant({ cities: _cities } = {}) {
   const [loading, setLoading] = useState(false);
   const [guideEnabled, setGuideEnabled] = useState(false);
   const [confirmDraft, setConfirmDraft] = useState(null);
+  const [pendingCitySuggestion, setPendingCitySuggestion] = useState(null);
   const scrollerRef = useRef(null);
   const inputRef = useRef(null);
   const wasAuthenticatedRef = useRef(Boolean(auth.isAuthenticated));
@@ -270,6 +349,7 @@ export default function HomeAiAssistant({ cities: _cities } = {}) {
       setChat([]);
       setGuideEnabled(false);
       setConfirmDraft(null);
+      setPendingCitySuggestion(null);
       saveMemory({ context: {}, history: [] });
     }
     wasAuthenticatedRef.current = isAuthenticated;
@@ -290,13 +370,20 @@ export default function HomeAiAssistant({ cities: _cities } = {}) {
   }
 
   function startGuidedFlow() {
-    setGuideEnabled(true);
     if (loading) return;
-    const question = getGuideQuestion(context, confirmDraft);
+    const nextContext = {};
+    const question = getGuideQuestion(nextContext, null);
     if (!question) return;
-    const last = chat[chat.length - 1];
-    if (last?.role === "assistant" && String(last?.content || "").trim() === question) return;
-    pushTurn("assistant", question);
+    const nextChat = [{ role: "assistant", content: question }];
+    setGuideEnabled(true);
+    setPendingCitySuggestion(null);
+    setContext(nextContext);
+    setChat(nextChat);
+    setMessage("");
+    setConfirmDraft(null);
+    saveMemory({ context: nextContext, history: nextChat });
+    scrollToBottom();
+    inputRef.current?.focus();
   }
 
   async function prepareBookingFromAction(action, recommendations, userText) {
@@ -405,6 +492,12 @@ export default function HomeAiAssistant({ cities: _cities } = {}) {
   async function sendMessage(overrideText) {
     const text = (overrideText ?? message).trim();
     if (!text || loading) return;
+    if (isResetChatIntent(text)) {
+      resetConversation();
+      setMessage("");
+      pushTurn("assistant", "Chat reset. You can start again anytime.", [], {});
+      return;
+    }
     if (shouldShowGuide(text)) {
       startGuidedFlow();
       setMessage("");
@@ -416,6 +509,38 @@ export default function HomeAiAssistant({ cities: _cities } = {}) {
     setMessage("");
     inputRef.current?.focus();
     const withUser = pushTurn("user", text);
+    if (
+      !guideEnabled &&
+      pendingCitySuggestion &&
+      !context?.city &&
+      !context?.anyCity &&
+      !Number(context?.selectedHotelId || 0)
+    ) {
+      if (isAffirmativeIntent(normalizedText)) {
+        const nextContext = { ...context, city: pendingCitySuggestion, anyCity: false };
+        setPendingCitySuggestion(null);
+        setContext(nextContext);
+        saveMemory({ context: nextContext, history: withUser });
+        navigateWithContext({ navigate, updateBookingUi, ctx: nextContext, fallbackGuests: 1 });
+        pushTurn(
+          "assistant",
+          `City set to ${nextContext.city}. Tell me your check-in date, check-out date, and number of guests.`,
+          withUser,
+          nextContext,
+        );
+        return;
+      }
+      if (isNegativeIntent(normalizedText)) {
+        setPendingCitySuggestion(null);
+        pushTurn("assistant", "No problem. Type the city again, or say: any city.", withUser, context);
+        return;
+      }
+      setPendingCitySuggestion(null);
+    }
+    if (!guideEnabled && isCasualGreetingIntent(normalizedText)) {
+      pushTurn("assistant", greetingReply(), withUser, context);
+      return;
+    }
     setLoading(true);
 
     try {
@@ -427,14 +552,51 @@ export default function HomeAiAssistant({ cities: _cities } = {}) {
 
         // Step 1: city (or any city)
         if (!hasCity) {
+          if (pendingCitySuggestion) {
+            if (isAffirmativeIntent(normalizedText)) {
+              const resolved = pendingCitySuggestion;
+              const nextContext = { ...context, city: resolved, anyCity: false };
+              setPendingCitySuggestion(null);
+              setContext(nextContext);
+              saveMemory({ context: nextContext, history: withUser });
+              navigateWithContext({ navigate, updateBookingUi, ctx: nextContext, fallbackGuests: 1 });
+
+              pushTurn(
+                "assistant",
+                `Step 1 saved. City: ${resolved}. Step 2: what are your check-in and check-out dates? (YYYY-MM-DD)`,
+                withUser,
+                nextContext,
+              );
+              return;
+            }
+            if (isNegativeIntent(normalizedText)) {
+              setPendingCitySuggestion(null);
+              pushTurn("assistant", "No problem. Type the city again, or say: any city.", withUser, context);
+              return;
+            }
+            setPendingCitySuggestion(null);
+          }
           const any = isAnyCityIntent(normalizedText);
-          const resolved = any ? "" : (resolveKnownCityBilingual(normalizedText) || extractKnownCityFromText(normalizedText));
+          const cityMatch = any ? { status: "exact", city: "" } : matchCityBilingual(normalizedText);
+          if (!any && cityMatch.status === "suggested") {
+            setPendingCitySuggestion(cityMatch.city);
+            pushTurn(
+              "assistant",
+              `I couldn't find "${normalizedText}" as a city in Palestine. Did you mean ${cityMatch.city}?`,
+              withUser,
+              context,
+            );
+            return;
+          }
+          const resolved = any ? "" : (cityMatch.city || extractKnownCityFromText(normalizedText) || resolveCityBilingual(normalizedText));
           if (!any && !resolved) {
-            pushTurn("assistant", "I did not recognize that city. Please choose a supported Palestine city, or say: any city.", withUser, context);
+            setPendingCitySuggestion(null);
+            pushTurn("assistant", getGuideQuestion(context, confirmDraft), withUser, context);
             return;
           }
 
           const nextContext = { ...context, city: resolved || "", anyCity: any };
+          setPendingCitySuggestion(null);
           setContext(nextContext);
           saveMemory({ context: nextContext, history: withUser });
           navigateWithContext({ navigate, updateBookingUi, ctx: nextContext, fallbackGuests: 1 });
@@ -526,6 +688,25 @@ export default function HomeAiAssistant({ cities: _cities } = {}) {
         return;
       }
 
+      if (
+        isUnsureIntent(normalizedText) &&
+        !context?.city &&
+        !context?.anyCity &&
+        !Number(context?.selectedHotelId || 0)
+      ) {
+        const anyContext = { ...context, anyCity: true, city: "" };
+        setContext(anyContext);
+        saveMemory({ context: anyContext, history: withUser });
+        navigateWithContext({ navigate, updateBookingUi, ctx: anyContext, fallbackGuests: 1 });
+        pushTurn(
+          "assistant",
+          "No problem — I will search across any city in Palestine. Now tell me your check-in, check-out, and number of guests.",
+          withUser,
+          anyContext,
+        );
+        return;
+      }
+
       const response = await bookingApi.assistantChat({
         message: normalizedText,
         context,
@@ -545,7 +726,16 @@ export default function HomeAiAssistant({ cities: _cities } = {}) {
       saveMemory({ context: effectiveContext, history: withUser });
 
       let assistantText = response?.reply || "I processed your request.";
-      if (Array.isArray(response?.missingFields) && response.missingFields.length > 0) {
+      const citySuggestionMatch = String(assistantText || "").match(/Did you mean\s+([^?]+)\?/i);
+      const hasCityValidationReply =
+        Boolean(citySuggestionMatch) ||
+        /there is no city called|couldn't find ".+" as a city/i.test(String(assistantText || ""));
+      if (citySuggestionMatch?.[1]) {
+        setPendingCitySuggestion(citySuggestionMatch[1].trim());
+      } else if (hasCityValidationReply) {
+        setPendingCitySuggestion(null);
+      }
+      if (Array.isArray(response?.missingFields) && response.missingFields.length > 0 && !hasCityValidationReply) {
         const firstMissing = response.missingFields[0];
         if (firstMissing === "checkIn") {
           assistantText = `I found ${response?.recommendations?.length || 0} option(s) in ${nextContext?.city || "that city"}. What is your check-in date?`;
@@ -671,7 +861,7 @@ export default function HomeAiAssistant({ cities: _cities } = {}) {
     }
   }
 
-  async function confirmBooking() {
+  async function continueToPayment() {
     if (!confirmDraft || loading) return;
     if (!auth.isAuthenticated) {
       pushTurn("assistant", "Please log in to complete your booking.");
@@ -684,42 +874,48 @@ export default function HomeAiAssistant({ cities: _cities } = {}) {
       setConfirmDraft(null);
       return;
     }
-    if (!confirmDraft.paymentMethod) {
-      pushTurn("assistant", "Please select a payment method before I complete the booking.");
-      return;
-    }
-
-    setLoading(true);
-    const baseChat = [...chat];
-    try {
-      const booking = await bookingApi.createBooking(buildBookingCreatePayload(confirmDraft));
-      const payment = await bookingApi.createPayment(booking.id);
-      await bookingApi.processPayment(payment.id, true);
-      const confirmed = await bookingApi.confirmBooking(booking.id);
-
-      pushTurn("assistant", "Your booking is confirmed. Opening your confirmation page.", baseChat);
-      navigate(`/confirmation/${booking.id}`, {
-        state: { booking: confirmed, hotel: confirmDraft.hotel, room: confirmDraft.room, payment },
-      });
-      setConfirmDraft(null);
-    } catch (err) {
-      pushTurn("assistant", humanizeError(err) + " You can retry confirmation or adjust details.", baseChat);
-    } finally {
-      setLoading(false);
-    }
+    const q = new URLSearchParams();
+    if (confirmDraft.hotel?.city) q.set("city", confirmDraft.hotel.city);
+    q.set("from", confirmDraft.checkIn);
+    q.set("to", confirmDraft.checkOut);
+    q.set("guests", String(confirmDraft.guests));
+    updateBookingUi({
+      city: confirmDraft.hotel?.city || "",
+      checkInDate: confirmDraft.checkIn,
+      checkOutDate: confirmDraft.checkOut,
+      guests: Number(confirmDraft.guests || 1),
+    });
+    pushTurn("assistant", "Opening payment form. Choose card or cash and finish booking there.");
+    navigate(`/hotels/${confirmDraft.hotel.id}?${q.toString()}#room-types`, {
+      state: {
+        intent: {
+          hotelId: confirmDraft.hotel.id,
+          roomTypeId: confirmDraft.room.id,
+          checkIn: confirmDraft.checkIn,
+          checkOut: confirmDraft.checkOut,
+          guests: Number(confirmDraft.guests || 1),
+          fromAssistant: true,
+          openPayment: true,
+        },
+      },
+    });
+    setConfirmDraft(null);
   }
 
   function resetConversation() {
     setContext({});
     setChat([]);
+    setMessage("");
     setGuideEnabled(false);
     setConfirmDraft(null);
+    setPendingCitySuggestion(null);
     saveMemory({ context: {}, history: [] });
     inputRef.current?.focus();
   }
 
   function clearContext() {
     setContext({});
+    setPendingCitySuggestion(null);
     saveMemory({ context: {}, history: chat });
   }
 
@@ -888,18 +1084,8 @@ export default function HomeAiAssistant({ cities: _cities } = {}) {
       <div className="home-ai__confirm">
         {confirmDraft ? (
           <>
-            <select
-              value={confirmDraft.paymentMethod || ""}
-              onChange={(e) =>
-                setConfirmDraft((current) => (current ? { ...current, paymentMethod: e.target.value } : current))
-              }
-              disabled={loading}
-            >
-              <option value="">{t("assistant.selectPayment")}</option>
-              <option value="mock_card">{t("assistant.paymentCard")}</option>
-            </select>
-            <button type="button" className="btn btn-primary" onClick={confirmBooking} disabled={loading}>
-              {t("assistant.confirmBooking")}
+            <button type="button" className="btn btn-primary" onClick={continueToPayment} disabled={loading}>
+              Continue to payment
             </button>
             <button type="button" className="btn btn-outline" onClick={() => setConfirmDraft(null)} disabled={loading}>
               {t("assistant.cancel")}

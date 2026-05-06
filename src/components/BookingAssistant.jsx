@@ -1,22 +1,26 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router-dom";
-import { bookingApi, buildBookingCreatePayload } from "../api/bookingApi";
+import { bookingApi } from "../api/bookingApi";
 import { useAuth } from "../auth/AuthContext";
 import { useBookingUi } from "../context/BookingUiContext";
 import {
   extractAssistantGuestsCount,
   extractKnownCityFromText,
+  matchCityBilingual,
   normalizeAssistantDateInput,
+  parseNaturalDateRange,
   parseUserPickIndex,
   resolveCityBilingual,
   resolveKnownCityBilingual,
 } from "../utils/aiAssistant";
 import { money } from "../utils/format";
-import { addDaysIso, isIsoOnOrBefore, todayIso, tomorrowIso } from "../utils/dates";
+import { addDaysIso, isIsoOnOrBefore, todayIso } from "../utils/dates";
 
 const ASSISTANT_MEMORY_KEY = "quickreserve-ai-memory-v2";
 const ASSISTANT_POSITION_KEY = "quickreserve-ai-position-v1";
 const ASSISTANT_AUTO_OPEN_KEY = "quickreserve-ai-auto-open-v1";
+const HOTELS_PAGE_SIZE = 6;
 
 function clamp(n, min, max) {
   return Math.min(max, Math.max(min, n));
@@ -40,6 +44,20 @@ function saveAssistantPosition(pos) {
   } catch {
     // noop
   }
+}
+
+function clearAssistantPosition() {
+  try {
+    localStorage.removeItem(ASSISTANT_POSITION_KEY);
+  } catch {
+    // noop
+  }
+}
+
+function resetAssistantToBottomRight(posRef, setPos) {
+  posRef.current = null;
+  setPos(null);
+  clearAssistantPosition();
 }
 
 function loadMemory() {
@@ -128,6 +146,27 @@ function findBestHotelNameMatch(hotels, requestedName) {
   return null;
 }
 
+function findSimilarHotelNameMatches(hotels, requestedName, limit = 5) {
+  const normalizedRequested = normalizeHotelName(requestedName);
+  if (!normalizedRequested) return [];
+  const scored = (hotels || [])
+    .map((hotel) => {
+      const normalizedCandidate = normalizeHotelName(hotel?.name);
+      if (!normalizedCandidate) return null;
+      const distance = levenshteinDistance(normalizedRequested, normalizedCandidate);
+      const includesScore =
+        normalizedCandidate.includes(normalizedRequested) || normalizedRequested.includes(normalizedCandidate)
+          ? -2
+          : 0;
+      const score = distance + includesScore;
+      return { hotel, score };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.score - b.score);
+  const threshold = Math.max(2, Math.floor(normalizedRequested.length * 0.4));
+  return scored.filter((x) => x.score <= threshold).slice(0, limit).map((x) => x.hotel);
+}
+
 function shouldShowGuide(text) {
   const value = String(text || "").toLowerCase();
   if (!value) return false;
@@ -162,6 +201,84 @@ function isAnyCityIntent(text) {
     value === "anyone" ||
     value.includes("anywhere")
   );
+}
+
+function isUnsureIntent(text) {
+  const value = String(text || "").toLowerCase().trim();
+  if (!value) return false;
+  const compact = value.replace(/\s+/g, "");
+  return (
+    value === "idk" ||
+    value === "i dont know" ||
+    value === "i don't know" ||
+    value === "not sure" ||
+    value === "unsure" ||
+    value === "whatever" ||
+    compact === "dontknow" ||
+    compact === "idontknow"
+  );
+}
+
+function isResetChatIntent(text) {
+  const value = String(text || "").toLowerCase().trim();
+  if (!value) return false;
+  return (
+    value === "clear" ||
+    value === "clear chat" ||
+    value === "reset" ||
+    value === "reset chat" ||
+    value === "new chat" ||
+    value === "restart chat"
+  );
+}
+
+function isAffirmativeIntent(text) {
+  const value = String(text || "")
+    .toLowerCase()
+    .trim()
+    .replace(/[.!?]+$/g, "")
+    .replace(/\s+/g, " ");
+  return [
+    "yes",
+    "yeah",
+    "yep",
+    "yup",
+    "correct",
+    "right",
+    "sure",
+    "ok",
+    "okay",
+    "yes please",
+    "please",
+    "that's right",
+    "that is right",
+  ].includes(value);
+}
+
+function isNegativeIntent(text) {
+  const value = String(text || "")
+    .toLowerCase()
+    .trim()
+    .replace(/[.!?]+$/g, "")
+    .replace(/\s+/g, " ");
+  return ["no", "nope", "nah", "not that", "wrong", "not correct"].includes(value);
+}
+
+function isCasualGreetingIntent(text) {
+  const value = String(text || "")
+    .toLowerCase()
+    .trim()
+    .replace(/[.!?]+$/g, "")
+    .replace(/\s+/g, " ");
+  if (!value) return false;
+  if (/\b(hotel|book|booking|reserve|room|city|date|guest|stay|check|bethlehem|jerusalem|ramallah|nablus|hebron|gaza)\b/.test(value)) {
+    return false;
+  }
+  return /^(hi|hello|hey|hey there|hello there|yo|good morning|good afternoon|good evening|salam)$/.test(value);
+}
+
+function greetingReply() {
+  return "Hi, I'm here. Tell me what you're looking for, or tap Guide me and I'll walk you through it.";
 }
 
 function formatHotelChoicesMessage(hotels) {
@@ -202,17 +319,41 @@ function extractHotelNameFromDatesPromptText(text) {
   return match?.[1]?.trim() || null;
 }
 
+// Generic words that should NEVER be treated as a city name.
+const INVALID_CITY_WORDS = new Set([
+  "city", "town", "place", "area", "location", "hotel", "somewhere",
+  "anywhere", "there", "here", "it", "this", "that", "some", "a", "the",
+  "yes", "no", "ok", "okay", "sure", "fine", "any", "another", "other",
+]);
+
+function isValidCityName(name) {
+  if (!name || typeof name !== "string") return false;
+  const n = name.trim().toLowerCase();
+  return n.length >= 2 && !INVALID_CITY_WORDS.has(n);
+}
+
 function extractCityCorrection(text) {
   const value = String(text || "").trim();
-  const match = value.match(/^(?:i mean|no[, ]*i mean)\s+([a-zA-Z\u0600-\u06FF\s-]+)$/i);
-  if (!match?.[1]) return "";
-  return resolveKnownCityBilingual(match[1].trim());
+  // Ordered from most-specific to least-specific
+  const patterns = [
+    /^(?:i mean|no[,\s]*i mean)\s+([a-zA-Z\u0600-\u06FF\s-]+)$/i,
+    /^(?:the\s+)?city\s+is\s+([a-zA-Z\u0600-\u06FF\s-]+)$/i,
+    /^i(?:'m|\s+am)\s+(?:going\s+to|staying\s+in|looking\s+in|in)\s+([a-zA-Z\u0600-\u06FF\s-]+)$/i,
+    /^(?:i\s+want|i\s+wanna|book\s+in|stay\s+in)\s+([a-zA-Z\u0600-\u06FF\s-]+)$/i,
+    /^([a-zA-Z\u0600-\u06FF\s-]+)\s+(?:city|please|hotel)$/i,
+  ];
+  for (const pattern of patterns) {
+    const match = value.match(pattern);
+    if (match?.[1]) {
+      const resolved = resolveCityBilingual(match[1].trim());
+      if (resolved && isValidCityName(resolved)) return resolved;
+    }
+  }
+  return "";
 }
 
 function getStrictCurrentStep(context, confirmDraft) {
-  // If a hotel is selected, we already know the city (from the hotel record),
-  // so don't block the flow on explicitly setting `context.city`.
-  const hasCity = Boolean(context?.city || context?.anyCity || Number(context?.selectedHotelId || 0) > 0);
+  const hasCity = Boolean(context?.city || context?.anyCity);
   const hasDatesGuests = Boolean(context?.checkIn && context?.checkOut && Number(context?.guests || 0) > 0);
   const hasHotel = Number(context?.selectedHotelId || 0) > 0;
   const hasRoom = Number(context?.selectedRoomTypeId || 0) > 0;
@@ -243,7 +384,7 @@ function getGuideQuestion(context, confirmDraft) {
     return "Great — step 1: which city do you want to stay in? (Or say: any city)";
   }
   if (!context?.checkIn || !context?.checkOut) {
-    return "Step 2: what are your check-in and check-out dates? (YYYY-MM-DD)";
+    return "Step 2: check-in and check-out dates — you can say e.g. \"today to tomorrow\", or type YYYY-MM-DD.";
   }
   if (!Number(context?.guests || 0)) {
     return "Step 3: how many guests will stay?";
@@ -254,8 +395,8 @@ function getGuideQuestion(context, confirmDraft) {
   if (!Number(context?.selectedRoomTypeId || 0)) {
     return "Step 5: which room type would you like for this hotel?";
   }
-  if (!confirmDraft?.paymentMethod) {
-    return "Step 6: please choose a payment method, then press Confirm booking.";
+  if (confirmDraft) {
+    return "Step 6: I will open the payment form so you can choose your payment method and complete booking.";
   }
   return "Everything is ready. Press Confirm booking when you are ready.";
 }
@@ -314,6 +455,9 @@ function cleanHotelNameIntent(value) {
     /^(?:i\s*(?:want|wanna)\s*(?:to\s*)?(?:book|reserve)\s*(?:me\s*)?(?:in|at)\s+|(?:book|reserve)\s*(?:me\s*)?(?:in|at)\s+|(?:in|at)\s+)/i,
     "",
   );
+  v = v.replace(/^(?:the\s+)?hotel\s+name\s+/i, "");
+  v = v.replace(/^name\s+/i, "");
+  v = v.replace(/^(?:called|named)\s+/i, "");
   v = v.replace(/^the\s+/i, "");
   v = v.replace(/[.?!,;:]+$/g, "").trim();
   return v;
@@ -335,8 +479,88 @@ function extractIsoDates(text) {
   return matches.slice(0, 3);
 }
 
+function resolveCheckInOutFromUserText(text, todayAnchorFn = todayIso) {
+  const iso = extractIsoDates(text);
+  if (iso.length >= 2) {
+    let [checkIn, checkOut] = iso;
+    if (new Date(checkOut) <= new Date(checkIn)) {
+      const d = new Date(checkIn);
+      d.setDate(d.getDate() + 1);
+      checkOut = d.toISOString().slice(0, 10);
+    }
+    return { checkIn, checkOut };
+  }
+  const natural = parseNaturalDateRange(text, todayAnchorFn);
+  if (natural?.checkIn && natural?.checkOut) return natural;
+  return null;
+}
+
+function findBestRoomNameMatch(rooms, requestedName) {
+  const normalizedRequested = normalizeHotelName(requestedName);
+  if (!normalizedRequested) return null;
+  const scored = (rooms || [])
+    .map((room) => {
+      const normalizedCandidate = normalizeHotelName(room?.name);
+      if (!normalizedCandidate) return null;
+      const distance = levenshteinDistance(normalizedRequested, normalizedCandidate);
+      const includesScore =
+        normalizedCandidate.includes(normalizedRequested) || normalizedRequested.includes(normalizedCandidate)
+          ? -2
+          : 0;
+      return { room, score: distance + includesScore };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.score - b.score);
+  if (!scored.length) return null;
+  const best = scored[0];
+  const threshold = Math.max(2, Math.floor(normalizedRequested.length * 0.35));
+  return best.score <= threshold ? best.room : null;
+}
+
+function pickRoomByText(text, rooms) {
+  if (!Array.isArray(rooms) || !rooms.length) return null;
+  const idx = parseUserPickIndex(text);
+  if (typeof idx === "number" && idx >= 0 && idx < rooms.length) return rooms[idx];
+  return findBestRoomNameMatch(rooms, text) || null;
+}
+
+function duplicateBookingPrepMessage(draft) {
+  return (
+    `\n\nBooking summary:\n` +
+    `Hotel: ${draft.hotel?.name}\n` +
+    `Room type: ${draft.room?.name}\n` +
+    `Dates: ${draft.checkIn} to ${draft.checkOut}\n` +
+    `Guests: ${draft.guests}\n` +
+    `Price: ${money(draft.quote?.totalPrice)}\n\n` +
+    `Do you want to confirm this booking?\n` +
+    `Please choose a payment method, then press Confirm booking.`
+  );
+}
+
 function extractGuestsCount(text) {
   return extractAssistantGuestsCount(text);
+}
+
+function isCapacityIntent(text) {
+  const t = String(text || "").toLowerCase();
+  if (!t) return false;
+  return (
+    /\bfit\b/.test(t) ||
+    /\bcapacity\b/.test(t) ||
+    /\b(can|could)\s+(fit|host|hold)\b/.test(t) ||
+    /\bfor\s+\d{1,2}\s*(guest|guests|geust|geusts|guset|gusets|person|people)\b/.test(t) ||
+    /\b\d{1,2}\s*(guest|guests|geust|geusts|guset|gusets|person|people)\b/.test(t) ||
+    /\bi\s+want\s+for\s+\d{1,2}\b/.test(t)
+  );
+}
+
+function guestsMissing(context) {
+  return !(Number(context?.guests || 0) > 0);
+}
+
+/** Solely digits → often "how many guests?" not "hotel #1" when guests are still missing. */
+function isPlainGuestCountDigits(text) {
+  return /^\s*\d{1,2}\s*$/.test(String(text || ""));
 }
 
 async function fetchHotelOptionsForContext(ctx) {
@@ -395,6 +619,22 @@ function extractHotelNameIntent(text) {
   return "";
 }
 
+function extractLooseHotelNameIntent(text) {
+  const v = String(text || "").trim();
+  if (!v) return "";
+  const withHotel = v.match(/(?:^|\b)hotel\b[\s:,-]*(.+)$/i);
+  if (withHotel?.[1]) {
+    const cleaned = cleanHotelNameIntent(withHotel[1]);
+    if (isLikelyHotelName(cleaned)) return cleaned;
+  }
+  const wantsHotel = /\b(i\s+want|i\s+wanna|book|reserve|looking\s+for|search)\b/i.test(v) && /\bhotel\b/i.test(v);
+  if (wantsHotel) {
+    const cleaned = cleanHotelNameIntent(v.replace(/\bhotel\b/gi, "").trim());
+    if (isLikelyHotelName(cleaned)) return cleaned;
+  }
+  return "";
+}
+
 // ─── Context-aware partial-input prompt ──────────────────────────────────────
 // Returns a question for ONLY the pieces still missing.
 function getMissingDatesGuestsMessage(context) {
@@ -409,6 +649,33 @@ function getMissingDatesGuestsMessage(context) {
   if (missing.length === 3) return "Please provide your check-in date, check-out date, and number of guests.";
   const list = missing.length === 2 ? `${missing[0]} and ${missing[1]}` : missing[0];
   return `Got it — I just need your ${list}.`;
+}
+
+function navigateWithContext({ navigate, updateBookingUi, ctx, fallbackGuests = 1 }) {
+  const guests = Number(ctx?.guests || fallbackGuests || 1);
+  const checkIn = ctx?.checkIn || "";
+  const checkOut = ctx?.checkOut || "";
+  const hasAnyCity = Boolean(ctx?.anyCity) || !ctx?.city;
+  const city = hasAnyCity ? "" : String(ctx?.city || "");
+
+  updateBookingUi({
+    city,
+    checkInDate: checkIn,
+    checkOutDate: checkOut,
+    guests,
+  });
+
+  const q = new URLSearchParams();
+  if (city) q.set("city", city);
+  if (checkIn) q.set("from", checkIn);
+  if (checkOut) q.set("to", checkOut);
+  q.set("guests", String(guests));
+
+  if (Number(ctx?.selectedHotelId || 0) > 0) {
+    navigate(`/hotels/${Number(ctx.selectedHotelId)}?${q.toString()}`);
+    return;
+  }
+  navigate(`/hotels?${q.toString()}`);
 }
 
 // ─── Match typed text against current hotel options ───────────────────────────
@@ -463,7 +730,10 @@ export default function BookingAssistant({ embedded = false }) {
   const [hotelOptions, setHotelOptions] = useState([]);
   const [roomOptions, setRoomOptions] = useState([]);
   const [selectedRoomOptionId, setSelectedRoomOptionId] = useState(null);
+  const [pickDialog, setPickDialog] = useState(null); // { type:"hotel"|"room", title:string, items:[] }
+  const [assistantPickerDismissed, setAssistantPickerDismissed] = useState(false);
   const [guideEnabled, setGuideEnabled] = useState(false);
+  const [pendingCitySuggestion, setPendingCitySuggestion] = useState(null);
   const wasAuthenticatedRef = useRef(Boolean(auth.isAuthenticated));
   const scrollerRef = useRef(null);
   const inputRef = useRef(null);
@@ -475,6 +745,38 @@ export default function BookingAssistant({ embedded = false }) {
     : "I can search hotels and complete booking steps for you.";
 
   if (!canUseAssistant) return null;
+
+  function getHotelsPageFilters(overrides = {}) {
+    const params = new URLSearchParams(location.search || "");
+    const from = overrides.from ?? params.get("from") ?? context?.checkIn ?? "";
+    const to = overrides.to ?? params.get("to") ?? context?.checkOut ?? "";
+    const guests = Number(overrides.guests ?? params.get("guests") ?? context?.guests ?? 1) || 1;
+    const filters = {
+      page: Number(overrides.page ?? params.get("page") ?? 0) || 0,
+      size: Number(overrides.size ?? HOTELS_PAGE_SIZE) || HOTELS_PAGE_SIZE,
+      city: overrides.city ?? params.get("city") ?? context?.city ?? undefined,
+      country: overrides.country ?? params.get("country") ?? undefined,
+      name: overrides.name ?? params.get("name") ?? undefined,
+      from: from || undefined,
+      to: to || undefined,
+      checkInDate: from || undefined,
+      checkOutDate: to || undefined,
+      guests,
+      adults: overrides.adults ?? params.get("adults") ?? undefined,
+      children: overrides.children ?? params.get("children") ?? undefined,
+    };
+    Object.keys(filters).forEach((key) => {
+      if (filters[key] === "" || filters[key] == null) delete filters[key];
+    });
+    return filters;
+  }
+
+  async function fetchCurrentHotelsPageOptions(overrides = {}) {
+    if (location.pathname !== "/hotels") return [];
+    const resp = await bookingApi.listHotels(getHotelsPageFilters(overrides));
+    const list = resp?.content || [];
+    return list.map(toHotelOption).filter((hotel) => hotel.id > 0 && hotel.name);
+  }
 
   useEffect(() => {
     if (embedded) {
@@ -554,7 +856,7 @@ export default function BookingAssistant({ embedded = false }) {
     };
   }, [embedded]);
 
-  // When opening (or resizing), ensure the assistant is inside the viewport (not hidden).
+  // Keep the assistant inside viewport as its content size changes while chatting.
   useEffect(() => {
     if (embedded) return;
     if (!open) return;
@@ -581,14 +883,24 @@ export default function BookingAssistant({ embedded = false }) {
 
     const raf = requestAnimationFrame(rectify);
     window.addEventListener("resize", rectify, { passive: true });
+    let ro = null;
+    if (typeof ResizeObserver !== "undefined" && rootRef.current) {
+      ro = new ResizeObserver(() => {
+        rectify();
+      });
+      ro.observe(rootRef.current);
+    }
     return () => {
       cancelAnimationFrame(raf);
       window.removeEventListener("resize", rectify);
+      if (ro) ro.disconnect();
     };
-  }, [embedded, open]);
+  }, [embedded, open, chat.length, loading, hotelOptions.length, roomOptions.length, Boolean(pickDialog), Boolean(confirmDraft)]);
 
   function startDrag(e) {
     if (embedded) return;
+    // Only allow dragging while the panel is open.
+    if (!open) return;
     if (e.button != null && e.button !== 0) return;
 
     const target = e.target;
@@ -643,7 +955,9 @@ export default function BookingAssistant({ embedded = false }) {
       setHotelOptions([]);
       setRoomOptions([]);
       setSelectedRoomOptionId(null);
+      setAssistantPickerDismissed(false);
       setGuideEnabled(false);
+      setPendingCitySuggestion(null);
       saveMemory({ context: {}, history: [] });
     }
     wasAuthenticatedRef.current = isAuthenticated;
@@ -659,39 +973,26 @@ export default function BookingAssistant({ embedded = false }) {
   }, [open]);
 
   useEffect(() => {
+    const params = new URLSearchParams(location.search || "");
+    const hasPageScopedSearch =
+      ["name", "city", "country", "from", "to", "guests", "adults", "children"].some((key) => Boolean(params.get(key))) ||
+      Boolean(context?.city || context?.checkIn || context?.checkOut || Number(context?.guests || 0) > 0);
     const shouldSyncWithHotelsPage =
       open &&
       !loading &&
       !confirmDraft &&
-      hotelOptions.length > 0 &&
+      (hotelOptions.length > 0 || hasPageScopedSearch) &&
       !Number(context?.selectedHotelId || 0) &&
       location.pathname === "/hotels";
     if (!shouldSyncWithHotelsPage) return;
 
     let cancelled = false;
-    const params = new URLSearchParams(location.search || "");
-    const city = params.get("city") || context?.city || undefined;
-    const from = params.get("from") || context?.checkIn || undefined;
-    const to = params.get("to") || context?.checkOut || undefined;
-    const guests = Number(params.get("guests") || context?.guests || 1);
-    const page = Number(params.get("page") || 0);
-    const size = Number(params.get("size") || 10);
 
     (async () => {
       try {
-        const resp = await bookingApi.listHotels({
-          city,
-          from,
-          to,
-          guests,
-          checkInDate: from,
-          checkOutDate: to,
-          page,
-          size,
-        });
-        const list = resp?.content || [];
-        if (cancelled || !Array.isArray(list) || list.length === 0) return;
-        setHotelOptions(list.map(toHotelOption).filter((hotel) => hotel.id > 0 && hotel.name));
+        const options = await fetchCurrentHotelsPageOptions();
+        if (cancelled || options.length === 0) return;
+        setHotelOptions(options);
       } catch {
         // Keep existing options if page-sync request fails.
       }
@@ -713,6 +1014,7 @@ export default function BookingAssistant({ embedded = false }) {
     location.pathname,
     location.search,
   ]);
+
 
   function pushTurn(role, content, nextChat = chat, contextOverride = context) {
     const updated = [...nextChat, { role, content }];
@@ -813,13 +1115,14 @@ export default function BookingAssistant({ embedded = false }) {
     if (!roomTypeId) {
       throw new Error("Please choose a room type before I prepare the booking.");
     }
-    let room = null;
-    room = validRooms.find((r) => Number(r.id) === roomTypeId) || null;
+    const room = validRooms.find((r) => Number(r.id) === roomTypeId) || null;
     if (!room) {
-      throw new Error("I could not find that room type for this hotel. Please choose one of the listed room types.");
+      throw new Error("That room type is not available here. Please choose one of the room types listed for this hotel.");
     }
     if (Number(room.capacity || 0) < guests) {
-      throw new Error(`The selected room type (${room.name}) supports fewer than ${guests} guest(s). Please choose another room type.`);
+      throw new Error(
+        `That room (${room.name}) only holds up to ${room.capacity} guest(s). Pick a room that fits ${guests} guest(s) from the options below.`,
+      );
     }
 
     const quote = await bookingApi.checkAvailability({
@@ -847,12 +1150,17 @@ export default function BookingAssistant({ embedded = false }) {
   async function sendMessage(overrideText) {
     const text = (overrideText ?? message).trim();
     if (!text || loading) return;
-    if (shouldShowGuide(text)) {
-      setGuideEnabled(true);
+    if (isResetChatIntent(text)) {
+      resetConversation();
       setMessage("");
-      const withUser = pushTurn("user", text);
-      const question = getGuideQuestion(context, confirmDraft);
-      if (question) pushTurn("assistant", question, withUser, context);
+      if (open) {
+        pushTurn("assistant", "Chat reset. You can start again anytime.", [], {});
+      }
+      return;
+    }
+    if (shouldShowGuide(text)) {
+      startGuidedFlow();
+      setMessage("");
       return;
     }
     // Normalize shorthand dates ("7-5" → "2026-05-07") before processing or sending to backend.
@@ -860,23 +1168,131 @@ export default function BookingAssistant({ embedded = false }) {
     const userMeansAnyCity = isAnyCityIntent(normalizedText);
     setMessage("");
     const withUser = pushTurn("user", text);
+    if (
+      !guideEnabled &&
+      pendingCitySuggestion &&
+      !context?.city &&
+      !context?.anyCity &&
+      !Number(context?.selectedHotelId || 0)
+    ) {
+      if (isAffirmativeIntent(normalizedText)) {
+        const nextContext = { ...context, city: pendingCitySuggestion, anyCity: false };
+        setPendingCitySuggestion(null);
+        setContext(nextContext);
+        setHotelOptions([]);
+        setRoomOptions([]);
+        saveMemory({ context: nextContext, history: withUser });
+        navigateWithContext({ navigate, updateBookingUi, ctx: nextContext, fallbackGuests: 1 });
+        const missingMsg = getMissingDatesGuestsMessage(nextContext) ||
+          "Please share your check-in date, check-out date, and number of guests.";
+        pushTurn("assistant", `City set to ${nextContext.city}. ${missingMsg}`, withUser, nextContext);
+        return;
+      }
+      if (isNegativeIntent(normalizedText)) {
+        setPendingCitySuggestion(null);
+        pushTurn("assistant", "No problem. Type the city again, or say: any city.", withUser, context);
+        return;
+      }
+      setPendingCitySuggestion(null);
+    }
+    if (!guideEnabled && isCasualGreetingIntent(normalizedText)) {
+      pushTurn("assistant", greetingReply(), withUser, context);
+      return;
+    }
     setLoading(true);
 
     try {
       // ── Guided flow (local step-by-step; no backend chat) ─────────────────────
       if (guideEnabled) {
-        // If user mentions a hotel name explicitly, skip city and go straight to name-search.
-        if (!Number(context?.selectedHotelId || 0)) {
+        // ── City correction: handle at any stage so the user can always fix their city ──
+        const cityCorrectionGuide = extractCityCorrection(normalizedText);
+        if (cityCorrectionGuide) {
+          setPendingCitySuggestion(null);
+          const nextContext = {
+            ...context,
+            city: cityCorrectionGuide,
+            anyCity: false,
+            selectedHotelId: null,
+            selectedHotelName: null,
+            selectedRoomTypeId: null,
+            selectedRoomTypeName: null,
+          };
+          setContext(nextContext);
+          setHotelOptions([]);
+          setRoomOptions([]);
+          setConfirmDraft(null);
+          saveMemory({ context: nextContext, history: withUser });
+          navigateWithContext({ navigate, updateBookingUi, ctx: nextContext, fallbackGuests: 1 });
+          const missingMsg = getMissingDatesGuestsMessage(nextContext) ||
+            "Please provide your check-in date, check-out date, and number of guests.";
+          pushTurn("assistant", `City updated to ${cityCorrectionGuide}. ${missingMsg}`, withUser, nextContext);
+          return;
+        }
+
+        const hasHotel = Number(context?.selectedHotelId || 0) > 0;
+        const hasCity = Boolean(context?.city || context?.anyCity);
+        const hasDates = Boolean(context?.checkIn && context?.checkOut);
+        const hasGuests = Number(context?.guests || 0) > 0;
+        const canSearchHotelByName = hasCity && hasDates && hasGuests && !hasHotel;
+
+        if (pendingCitySuggestion && !hasCity && !hasHotel) {
+          if (isAffirmativeIntent(normalizedText)) {
+            const resolved = pendingCitySuggestion;
+            const nextContext = { ...context, city: resolved, anyCity: false };
+            setPendingCitySuggestion(null);
+            setContext(nextContext);
+            saveMemory({ context: nextContext, history: withUser });
+            navigateWithContext({ navigate, updateBookingUi, ctx: nextContext, fallbackGuests: 1 });
+            setHotelOptions([]);
+            setRoomOptions([]);
+            pushTurn(
+              "assistant",
+              `Step 1 saved. City: ${resolved}. Step 2: check-in and check-out (say e.g. "today to tomorrow", or type YYYY-MM-DD).`,
+              withUser,
+              nextContext,
+            );
+            return;
+          }
+          if (isNegativeIntent(normalizedText)) {
+            setPendingCitySuggestion(null);
+            pushTurn("assistant", "No problem. Type the city again, or say: any city.", withUser, context);
+            return;
+          }
+          setPendingCitySuggestion(null);
+        }
+
+        if (!hasHotel && extractHotelNameIntent(normalizedText) && !canSearchHotelByName) {
+          pushTurn(
+            "assistant",
+            "Let’s stay in order: city first, then dates, guest count — then hotel and room.",
+            withUser,
+            context,
+          );
+          return;
+        }
+
+        if (canSearchHotelByName) {
           const hotelNameIntent = extractHotelNameIntent(normalizedText);
           if (hotelNameIntent) {
             const q = new URLSearchParams();
             q.set("name", hotelNameIntent);
+            if (context?.city && !context?.anyCity) q.set("city", context.city);
             if (context?.checkIn) q.set("from", context.checkIn);
             if (context?.checkOut) q.set("to", context.checkOut);
             if (Number(context?.guests || 0) > 0) q.set("guests", String(Number(context.guests)));
             navigate(`/hotels?${q.toString()}`);
 
-            const resp = await bookingApi.listHotels({ name: hotelNameIntent, page: 0, size: 10 });
+            const resp = await bookingApi.listHotels({
+              name: hotelNameIntent,
+              city: context?.city && !context?.anyCity ? context.city : undefined,
+              from: context?.checkIn || undefined,
+              to: context?.checkOut || undefined,
+              checkInDate: context?.checkIn || undefined,
+              checkOutDate: context?.checkOut || undefined,
+              guests: Number(context?.guests || 1) || 1,
+              page: 0,
+              size: HOTELS_PAGE_SIZE,
+            });
             const list = resp?.content || [];
             const options = list.map(toHotelOption).filter((h) => h.id > 0 && h.name);
             if (options.length === 0) {
@@ -886,7 +1302,7 @@ export default function BookingAssistant({ embedded = false }) {
             if (options.length > 1) {
               setHotelOptions(options);
               setRoomOptions([]);
-              pushTurn("assistant", `Which "${hotelNameIntent}" hotel do you mean? Choose one below.`, withUser);
+              pushTurn("assistant", `I found ${options.length} matching hotels on this page. Choose one below.`, withUser);
               return;
             }
             await selectHotelLocally(options[0], withUser);
@@ -894,35 +1310,52 @@ export default function BookingAssistant({ embedded = false }) {
           }
         }
 
-        const hasHotel = Number(context?.selectedHotelId || 0) > 0;
-        const hasCity = Boolean(context?.city || context?.anyCity);
-        const hasDates = Boolean(context?.checkIn && context?.checkOut);
-        const hasGuests = Number(context?.guests || 0) > 0;
-
         // Step 1: city (or any city)
         if (!hasCity && !hasHotel) {
           const any = isAnyCityIntent(normalizedText);
-          const resolved = any ? "" : (resolveKnownCityBilingual(normalizedText) || extractKnownCityFromText(normalizedText));
+          if (!any && isUnsureIntent(normalizedText)) {
+            pushTurn(
+              "assistant",
+              "No problem. If you are not sure about city, just say: any city. Then I will show available hotels in Palestine.",
+              withUser,
+              context,
+            );
+            return;
+          }
+          const cityMatch = any ? { status: "exact", city: "" } : matchCityBilingual(normalizedText);
+          if (!any && cityMatch.status === "suggested") {
+            setPendingCitySuggestion(cityMatch.city);
+            pushTurn(
+              "assistant",
+              `I couldn't find "${normalizedText}" as a city in Palestine. Did you mean ${cityMatch.city}?`,
+              withUser,
+              context,
+            );
+            return;
+          }
+          const resolved = any ? "" : (cityMatch.city || extractKnownCityFromText(normalizedText));
           if (!any && !resolved) {
-            pushTurn("assistant", "I did not recognize that city. Please choose a supported Palestine city, or say: any city.", withUser, context);
+            setPendingCitySuggestion(null);
+            pushTurn(
+              "assistant",
+              `There is no city called "${normalizedText}" in Palestine. Please enter a valid city like Bethlehem, Jerusalem, Ramallah, Nablus, Hebron, or Gaza.`,
+              withUser,
+              context,
+            );
             return;
           }
 
           const nextContext = { ...context, city: resolved || "", anyCity: any };
+          setPendingCitySuggestion(null);
           setContext(nextContext);
           saveMemory({ context: nextContext, history: withUser });
-
-          const q = new URLSearchParams();
-          if (!any && resolved) q.set("city", resolved);
-          navigate(`/hotels?${q.toString()}`);
-
-          const options = await fetchHotelOptionsForContext(nextContext);
-          setHotelOptions(options);
+          navigateWithContext({ navigate, updateBookingUi, ctx: nextContext, fallbackGuests: 1 });
+          setHotelOptions([]);
           setRoomOptions([]);
 
           pushTurn(
             "assistant",
-            `Step 1 saved. ${any ? "Any city is fine." : `City: ${resolved}.`} Step 2: what are your check-in and check-out dates? (YYYY-MM-DD)`,
+            `Step 1 saved. ${any ? "Any city is fine." : `City: ${resolved}.`} Step 2: check-in and check-out (say e.g. "today to tomorrow", or type YYYY-MM-DD).`,
             withUser,
             nextContext,
           );
@@ -931,12 +1364,16 @@ export default function BookingAssistant({ embedded = false }) {
 
         // Step 2: dates
         if (!hasDates) {
-          const dates = extractIsoDates(normalizedText);
-          if (dates.length < 2) {
-            pushTurn("assistant", "Please provide check-in and check-out dates (YYYY-MM-DD). Example: 2026-05-10 to 2026-05-13", withUser);
+          const resolvedDates = resolveCheckInOutFromUserText(normalizedText, todayIso);
+          if (!resolvedDates) {
+            pushTurn(
+              "assistant",
+              "Please give both check-in and check-out — for example \"today to tomorrow\", or two dates like 2026-05-10 to 2026-05-13.",
+              withUser,
+            );
             return;
           }
-          let [checkIn, checkOut] = dates;
+          let { checkIn, checkOut } = resolvedDates;
           if (new Date(checkOut) <= new Date(checkIn)) {
             const d = new Date(checkIn);
             d.setDate(d.getDate() + 1);
@@ -946,20 +1383,8 @@ export default function BookingAssistant({ embedded = false }) {
           const nextContext = { ...context, checkIn, checkOut };
           setContext(nextContext);
           saveMemory({ context: nextContext, history: withUser });
-
-          const q = new URLSearchParams();
-          if (nextContext?.anyCity) {
-            // no city param
-          } else if (nextContext?.city) {
-            q.set("city", nextContext.city);
-          }
-          q.set("from", checkIn);
-          q.set("to", checkOut);
-          if (Number(nextContext?.guests || 0) > 0) q.set("guests", String(Number(nextContext.guests)));
-          navigate(`/hotels?${q.toString()}`);
-
-          const options = await fetchHotelOptionsForContext(nextContext);
-          setHotelOptions(options);
+          navigateWithContext({ navigate, updateBookingUi, ctx: nextContext, fallbackGuests: 1 });
+          setHotelOptions([]);
           setRoomOptions([]);
 
           pushTurn("assistant", "Step 2 saved. Step 3: how many guests will stay?", withUser, nextContext);
@@ -1070,6 +1495,56 @@ export default function BookingAssistant({ embedded = false }) {
         return;
       }
 
+      if (
+        isUnsureIntent(normalizedText) &&
+        !context?.city &&
+        !context?.anyCity &&
+        !Number(context?.selectedHotelId || 0)
+      ) {
+        const nextContext = { ...context, anyCity: true, city: "" };
+        setContext(nextContext);
+        saveMemory({ context: nextContext, history: withUser });
+        navigateWithContext({ navigate, updateBookingUi, ctx: nextContext, fallbackGuests: 1 });
+        pushTurn(
+          "assistant",
+          "No problem — I will search across any city in Palestine. Now tell me your check-in, check-out, and number of guests.",
+          withUser,
+          nextContext,
+        );
+        return;
+      }
+
+      if (isCapacityIntent(normalizedText) && !guideEnabled) {
+        const guests = extractGuestsCount(normalizedText);
+        if (guests) {
+          const explicitCity = extractExplicitCity(normalizedText);
+          const nextContext = {
+            ...context,
+            city: explicitCity || context?.city || "",
+            anyCity: explicitCity ? false : context?.anyCity,
+            guests,
+          };
+          setContext(nextContext);
+          saveMemory({ context: nextContext, history: withUser });
+          navigateWithContext({ navigate, updateBookingUi, ctx: nextContext, fallbackGuests: guests });
+          if (nextContext?.checkIn && nextContext?.checkOut) {
+            const refreshed = await fetchHotelOptionsForContext(nextContext);
+            setHotelOptions(refreshed);
+            setRoomOptions([]);
+          }
+          const missingMsg =
+            getMissingDatesGuestsMessage(nextContext) ||
+            "Please provide your city, check-in date, and check-out date.";
+          pushTurn(
+            "assistant",
+            `Got it — you need a hotel for ${guests} guests. ${missingMsg}`,
+            withUser,
+            nextContext,
+          );
+          return;
+        }
+      }
+
       // ── "Another hotel" intent ─────────────────────────────────────────────────
       if (isChangeHotelIntent(normalizedText)) {
         const nextContext = {
@@ -1118,6 +1593,89 @@ export default function BookingAssistant({ embedded = false }) {
         return;
       }
 
+      // ── Plain number while guests missing: interpret as guest count, not hotel #
+      // (Otherwise "1" after "Got it — I just need your number of guests" picks hotel #1.)
+      if (
+        !isChangeHotelIntent(normalizedText) &&
+        guestsMissing(context) &&
+        Boolean(context?.checkIn && context?.checkOut) &&
+        Boolean(context?.city || context?.anyCity) &&
+        isPlainGuestCountDigits(normalizedText)
+      ) {
+        const guests = extractGuestsCount(normalizedText);
+        if (guests) {
+          const nextContext = { ...context, guests };
+          setContext(nextContext);
+          saveMemory({ context: nextContext, history: withUser });
+
+          if (Number(nextContext.selectedHotelId || 0) > 0) {
+            const hotelId = Number(nextContext.selectedHotelId);
+            const q = new URLSearchParams();
+            if (nextContext.city) q.set("city", nextContext.city);
+            if (nextContext.checkIn) q.set("from", nextContext.checkIn);
+            if (nextContext.checkOut) q.set("to", nextContext.checkOut);
+            q.set("guests", String(guests));
+            updateBookingUi({
+              city: nextContext.city || "",
+              checkInDate: nextContext.checkIn,
+              checkOutDate: nextContext.checkOut,
+              guests,
+            });
+            navigate(`/hotels/${hotelId}?${q.toString()}#room-types`, {
+              state: { intent: { hotelId, fromAssistant: true } },
+            });
+            setHotelOptions([]);
+            try {
+              const rooms = await bookingApi.getRoomTypes(hotelId);
+              const validRooms = (rooms || []).filter((r) => isValidRoomName(r?.name));
+              setRoomOptions(validRooms);
+              const hotelLabel = nextContext.selectedHotelName || "the hotel";
+              if (validRooms.length > 0) {
+                const options = validRooms.map(
+                  (r, idx) =>
+                    `${idx + 1}) ${r.name} — ${money(r.basePrice)} (up to ${r.capacity} guest${Number(r.capacity) !== 1 ? "s" : ""})`,
+                );
+                pushTurn(
+                  "assistant",
+                  `Guests: ${guests}. You've selected ${hotelLabel}. Here are the available room types:\n${options.join("\n")}\nWhich room would you like?`,
+                  withUser,
+                  nextContext,
+                );
+              } else {
+                pushTurn(
+                  "assistant",
+                  `Guests: ${guests}. You've selected ${hotelLabel}, but no room types are listed right now.`,
+                  withUser,
+                  nextContext,
+                );
+              }
+            } catch (err) {
+              pushTurn("assistant", humanizeError(err), withUser, nextContext);
+            }
+            return;
+          }
+
+          const q = new URLSearchParams();
+          if (!nextContext.anyCity && nextContext.city) q.set("city", nextContext.city);
+          q.set("from", nextContext.checkIn);
+          q.set("to", nextContext.checkOut);
+          q.set("guests", String(guests));
+          navigate(`/hotels?${q.toString()}`);
+          const options = await fetchHotelOptionsForContext(nextContext);
+          setHotelOptions(options);
+          setRoomOptions([]);
+          pushTurn(
+            "assistant",
+            options.length
+              ? `Guests saved (${guests}). Choose a hotel from the options below.`
+              : `I couldn't find hotels for ${guests} guest(s) with those dates. Try adjusting dates or city.`,
+            withUser,
+            nextContext,
+          );
+          return;
+        }
+      }
+
       // ── Hotel selection by text ───────────────────────────────────────────────
       // When hotel buttons are visible, typing a number or a name picks the hotel
       // instantly — no AI call, hotel buttons cleared, room types shown immediately.
@@ -1129,26 +1687,122 @@ export default function BookingAssistant({ embedded = false }) {
         }
       }
 
+      // ── Typed / spoken room pick while options are shown (must match hotel & guest count) ─
+      if (
+        roomOptions.length > 0 &&
+        Number(context?.selectedHotelId || 0) > 0 &&
+        !confirmDraft &&
+        Boolean(context?.checkIn && context?.checkOut) &&
+        Number(context?.guests || 0) > 0 &&
+        !isChangeHotelIntent(normalizedText)
+      ) {
+        const pickedRoom = pickRoomByText(normalizedText, roomOptions);
+        if (pickedRoom) {
+          const guestsN = Number(context.guests || 0);
+          if (Number(pickedRoom.capacity || 0) < guestsN) {
+            pushTurn(
+              "assistant",
+              `"${pickedRoom.name}" holds up to ${pickedRoom.capacity} guest(s), but you need ${guestsN}. Pick a room with enough capacity from the list below.`,
+              withUser,
+              context,
+            );
+            return;
+          }
+          try {
+            const nextContext = {
+              ...context,
+              selectedRoomTypeId: pickedRoom.id,
+              selectedRoomTypeName: pickedRoom.name,
+            };
+            setContext(nextContext);
+            saveMemory({ context: nextContext, history: withUser });
+            const draft = await prepareBookingFromAction(
+              {
+                hotelId: nextContext.selectedHotelId,
+                hotelName: nextContext.selectedHotelName,
+                roomTypeId: pickedRoom.id,
+                checkIn: nextContext.checkIn,
+                checkOut: nextContext.checkOut,
+                guests: guestsN,
+              },
+              [],
+              normalizedText,
+            );
+            setRoomOptions([]);
+            setSelectedRoomOptionId(null);
+            setConfirmDraft(draft);
+            pushTurn(
+              "assistant",
+              `Great — ${pickedRoom.name} works for your group.` + duplicateBookingPrepMessage(draft),
+              withUser,
+              nextContext,
+            );
+          } catch (err) {
+            try {
+              const hid = Number(context.selectedHotelId);
+              const rooms = await bookingApi.getRoomTypes(hid);
+              setRoomOptions((rooms || []).filter((r) => isValidRoomName(r?.name)));
+            } catch {
+              // keep prior list
+            }
+            pushTurn("assistant", humanizeError(err), withUser, context);
+          }
+          return;
+        }
+      }
+
       // ── Hotel name intent (no city needed) ───────────────────────────────────
-      // If the user mentions a hotel name, search by name and let them choose.
-      if (!Number(context?.selectedHotelId || 0)) {
-        const hotelNameIntent = extractHotelNameIntent(normalizedText);
-        if (hotelNameIntent) {
+      // In normal chat, always allow changing hotel by name even if one is already selected.
+      {
+        const hotelNameIntent = extractHotelNameIntent(normalizedText) || extractLooseHotelNameIntent(normalizedText);
+        if (hotelNameIntent && !guideEnabled) {
+          const explicitCity = extractExplicitCity(normalizedText);
+          const searchCity = explicitCity || context?.city || "";
           // Sync the Hotels page search field via URL param.
           {
             const q = new URLSearchParams();
             q.set("name", hotelNameIntent);
+            if (searchCity) q.set("city", searchCity);
             if (context?.checkIn) q.set("from", context.checkIn);
             if (context?.checkOut) q.set("to", context.checkOut);
             if (Number(context?.guests || 0) > 0) q.set("guests", String(Number(context.guests)));
             navigate(`/hotels?${q.toString()}`);
           }
 
-          const resp = await bookingApi.listHotels({ name: hotelNameIntent, page: 0, size: 10 });
+          const resp = await bookingApi.listHotels({
+            name: hotelNameIntent,
+            city: searchCity || undefined,
+            from: context?.checkIn || undefined,
+            to: context?.checkOut || undefined,
+            checkInDate: context?.checkIn || undefined,
+            checkOutDate: context?.checkOut || undefined,
+            guests: Number(context?.guests || 1) || 1,
+            page: 0,
+            size: HOTELS_PAGE_SIZE,
+          });
           const list = resp?.content || [];
           const options = list.map(toHotelOption).filter((h) => h.id > 0 && h.name);
 
           if (options.length === 0) {
+            const broad = await bookingApi.listHotels({ city: searchCity || undefined, page: 0, size: 80 });
+            const broadList = broad?.content || [];
+            const broadOptions = broadList.map(toHotelOption).filter((h) => h.id > 0 && h.name);
+            const direct = findBestHotelNameMatch(broadOptions, hotelNameIntent);
+            if (direct) {
+              await selectHotelLocally(direct, withUser);
+              return;
+            }
+            const similar = findSimilarHotelNameMatches(broadOptions, hotelNameIntent, 5);
+            if (similar.length > 1) {
+              setHotelOptions(similar);
+              setRoomOptions([]);
+              pushTurn(
+                "assistant",
+                `I found similar hotels for "${hotelNameIntent}". Please choose one from the options below.`,
+                withUser,
+              );
+              return;
+            }
             pushTurn("assistant", `I couldn't find a hotel named "${hotelNameIntent}". Please check the spelling.`, withUser);
             return;
           }
@@ -1158,7 +1812,7 @@ export default function BookingAssistant({ embedded = false }) {
             setRoomOptions([]);
             pushTurn(
               "assistant",
-              `I found multiple hotels named "${hotelNameIntent}". Please choose one from the options below.`,
+              `I found ${options.length} matching hotels on this page. Please choose one from the options below.`,
               withUser,
             );
             return;
@@ -1193,9 +1847,15 @@ export default function BookingAssistant({ embedded = false }) {
         }
       }
 
+      const parsedNatural = parseNaturalDateRange(normalizedText, todayIso);
+      const contextForChatRequest =
+        parsedNatural && (!context.checkIn || !context.checkOut)
+          ? { ...context, checkIn: parsedNatural.checkIn, checkOut: parsedNatural.checkOut }
+          : context;
+
       const response = await bookingApi.assistantChat({
         message: normalizedText,
-        context: { ...context, _today: todayIso() },
+        context: { ...contextForChatRequest, _today: todayIso() },
         history: withUser,
       });
 
@@ -1208,6 +1868,18 @@ export default function BookingAssistant({ embedded = false }) {
       let effectiveContext = backendUsedAnyCityAsCity
         ? { ...nextContext, city: "", anyCity: true }
         : nextContext;
+
+      if (
+        parsedNatural?.checkIn &&
+        parsedNatural?.checkOut &&
+        (!effectiveContext.checkIn || !effectiveContext.checkOut)
+      ) {
+        effectiveContext = {
+          ...effectiveContext,
+          checkIn: parsedNatural.checkIn,
+          checkOut: parsedNatural.checkOut,
+        };
+      }
       const correctedCity = extractCityCorrection(normalizedText);
       if (correctedCity) {
         effectiveContext = {
@@ -1233,6 +1905,11 @@ export default function BookingAssistant({ embedded = false }) {
         if (!effectiveContext.city && prevCity && !userChangedCity && !correctedCity) {
           effectiveContext = { ...effectiveContext, city: prevCity };
         }
+        // If the user explicitly typed a new city name, force it in — even if the
+        // backend returned the old city in the context (it may lag behind).
+        if (userChangedCity && explicitNewCity && !correctedCity) {
+          effectiveContext = { ...effectiveContext, city: explicitNewCity };
+        }
         if (!effectiveContext.checkIn && prevCheckIn) {
           effectiveContext = { ...effectiveContext, checkIn: prevCheckIn };
         }
@@ -1244,14 +1921,24 @@ export default function BookingAssistant({ embedded = false }) {
         }
       }
 
+      // Reject generic words saved as city names (e.g. user literally typed "city").
+      if (effectiveContext.city && !isValidCityName(effectiveContext.city)) {
+        effectiveContext = { ...effectiveContext, city: "", anyCity: false };
+      }
+
       setContext(effectiveContext);
       saveMemory({ context: effectiveContext, history: withUser });
 
       let assistantText = response?.reply || "I processed your request.";
       if (correctedCity) {
-        assistantText = `Updated city to ${correctedCity}. Please provide check-in date, check-out date, and number of guests.`;
+        const missingAfterCity = getMissingDatesGuestsMessage({ ...effectiveContext, city: correctedCity }) ||
+          "Please provide your check-in date, check-out date, and number of guests.";
+        assistantText = `City set to ${correctedCity}. ${missingAfterCity}`;
+        setHotelOptions([]);
+        setRoomOptions([]);
       }
       setHotelOptions([]);
+      let usedSyncedHotelOptions = false;
       if (
         userMeansAnyCity &&
         /which city would you like to stay in\??|in which city would you like to stay\??/i.test(assistantText)
@@ -1288,10 +1975,11 @@ export default function BookingAssistant({ embedded = false }) {
           checkOutDate: effectiveContext.checkOut,
           guests: Number(effectiveContext.guests),
           page: 0,
-          size: 10,
+          size: HOTELS_PAGE_SIZE,
         });
         const allList = allResp?.content || [];
         setHotelOptions(allList.map(toHotelOption).filter((hotel) => hotel.id > 0 && hotel.name));
+        usedSyncedHotelOptions = allList.length > 0;
         assistantText =
           allList.length > 0
             ? `I found available hotels across Palestine for ${effectiveContext.guests} guest(s), ${effectiveContext.checkIn} to ${effectiveContext.checkOut}. Please choose one from the options below.`
@@ -1303,27 +1991,35 @@ export default function BookingAssistant({ embedded = false }) {
         !Number(nextContext?.selectedHotelId || 0)
       ) {
         try {
-          const city = response?.action?.city || nextContext?.city;
-          const checkIn = response?.action?.checkIn || nextContext?.checkIn;
-          const checkOut = response?.action?.checkOut || nextContext?.checkOut;
-          const guests = Number(response?.action?.guests || nextContext?.guests || 1);
-          const uiHotelsResp = await bookingApi.listHotels({
-            city,
-            from: checkIn,
-            to: checkOut,
-            checkInDate: checkIn,
-            checkOutDate: checkOut,
-            guests,
-            page: 0,
-            size: 5,
-          });
-          const uiHotels = uiHotelsResp?.content || [];
-          const uiMessage = formatHotelChoicesMessage(uiHotels);
-          if (uiHotels.length > 0) {
-            setHotelOptions(uiHotels.map(toHotelOption).filter((hotel) => hotel.id > 0 && hotel.name));
-          }
-          if (uiMessage) {
-            assistantText = uiMessage;
+          const currentPageOptions = await fetchCurrentHotelsPageOptions();
+          if (currentPageOptions.length > 0) {
+            setHotelOptions(currentPageOptions);
+            usedSyncedHotelOptions = true;
+            assistantText = `I am showing ${currentPageOptions.length} hotel${currentPageOptions.length === 1 ? "" : "s"} currently on this page. Choose one from the options below.`;
+          } else {
+            const city = response?.action?.city || nextContext?.city;
+            const checkIn = response?.action?.checkIn || nextContext?.checkIn;
+            const checkOut = response?.action?.checkOut || nextContext?.checkOut;
+            const guests = Number(response?.action?.guests || nextContext?.guests || 1);
+            const uiHotelsResp = await bookingApi.listHotels({
+              city,
+              from: checkIn,
+              to: checkOut,
+              checkInDate: checkIn,
+              checkOutDate: checkOut,
+              guests,
+              page: 0,
+              size: HOTELS_PAGE_SIZE,
+            });
+            const uiHotels = uiHotelsResp?.content || [];
+            const uiMessage = formatHotelChoicesMessage(uiHotels);
+            if (uiHotels.length > 0) {
+              setHotelOptions(uiHotels.map(toHotelOption).filter((hotel) => hotel.id > 0 && hotel.name));
+              usedSyncedHotelOptions = true;
+            }
+            if (uiMessage) {
+              assistantText = uiMessage;
+            }
           }
         } catch {
           // Keep backend text if synced list fails.
@@ -1333,7 +2029,7 @@ export default function BookingAssistant({ embedded = false }) {
         !Number(nextContext?.selectedHotelId || 0) &&
         Array.isArray(response?.recommendations) &&
         response.recommendations.length > 0 &&
-        hotelOptions.length === 0
+        !usedSyncedHotelOptions
       ) {
         setHotelOptions(
           response.recommendations
@@ -1398,19 +2094,24 @@ export default function BookingAssistant({ embedded = false }) {
             "Great choice. Please tell me your check-in date, check-out date, and number of guests.";
         }
       } else if (response?.action?.type === "PREPARE_BOOKING") {
-        setRoomOptions([]);
         setSelectedRoomOptionId(Number(nextContext?.selectedRoomTypeId || 0) || null);
-        const draft = await prepareBookingFromAction(response.action, response.recommendations, text);
-        setConfirmDraft(draft);
-        assistantText +=
-          `\n\nBooking summary:\n` +
-          `Hotel: ${draft.hotel?.name}\n` +
-          `Room type: ${draft.room?.name}\n` +
-          `Dates: ${draft.checkIn} to ${draft.checkOut}\n` +
-          `Guests: ${draft.guests}\n` +
-          `Price: ${money(draft.quote?.totalPrice)}\n\n` +
-          `Do you want to confirm this booking?\n` +
-          `Please choose a payment method, then press Confirm booking.`;
+        try {
+          const draft = await prepareBookingFromAction(response.action, response.recommendations, text);
+          setRoomOptions([]);
+          setConfirmDraft(draft);
+          assistantText += duplicateBookingPrepMessage(draft);
+        } catch (prepErr) {
+          const hid = Number(effectiveContext?.selectedHotelId || nextContext?.selectedHotelId || 0);
+          if (hid > 0) {
+            try {
+              const rooms = await bookingApi.getRoomTypes(hid);
+              setRoomOptions((rooms || []).filter((r) => isValidRoomName(r?.name)));
+            } catch {
+              /* keep existing list */
+            }
+          }
+          throw prepErr;
+        }
       }
 
       // Fallback: if backend only replies with room-type text, still show real UI room options.
@@ -1484,25 +2185,24 @@ export default function BookingAssistant({ embedded = false }) {
           }
         }
         if (hotelId > 0) {
-          const checkIn = nextContext?.checkIn || tomorrowIso();
-          let checkOut = nextContext?.checkOut;
-          if (!checkOut || new Date(checkOut) <= new Date(checkIn)) {
-            const d = new Date(checkIn);
-            d.setDate(d.getDate() + 1);
-            checkOut = d.toISOString().slice(0, 10);
-          }
-          const guests = Number(nextContext?.guests || 1);
+          const checkIn = nextContext?.checkIn;
+          const checkOut = nextContext?.checkOut;
+          const guests = Number(nextContext?.guests || 0);
           const query = new URLSearchParams();
-          query.set("from", checkIn);
-          query.set("to", checkOut);
-          query.set("guests", String(guests));
-          updateBookingUi({
-            city: nextContext?.city || "",
-            checkInDate: checkIn,
-            checkOutDate: checkOut,
-            guests,
-          });
-          navigate(`/hotels/${hotelId}?${query.toString()}`);
+          if (checkIn) query.set("from", checkIn);
+          if (checkOut) query.set("to", checkOut);
+          if (guests > 0) query.set("guests", String(guests));
+          if (checkIn && checkOut && guests > 0) {
+            updateBookingUi({
+              city: nextContext?.city || "",
+              checkInDate: checkIn,
+              checkOutDate: checkOut,
+              guests,
+            });
+            navigate(`/hotels/${hotelId}?${query.toString()}`);
+          } else {
+            navigate(`/hotels/${hotelId}`);
+          }
           setContext((prev) => ({
             ...prev,
             ...nextContext,
@@ -1537,15 +2237,44 @@ export default function BookingAssistant({ embedded = false }) {
         assistantText = `Which room type would you like?\n${options.join("\n")}\nReply with room name or number.`;
       }
 
-      const strictStep = getStrictCurrentStep(effectiveContext, confirmDraft);
-      if (strictStep === 2) {
+      const responseIntent = String(response?.intent || "").toLowerCase();
+      const responseMode = String(effectiveContext?.mode || "").toLowerCase();
+      const hasActiveBookingContext = Boolean(
+        effectiveContext?.city ||
+          effectiveContext?.anyCity ||
+          effectiveContext?.checkIn ||
+          effectiveContext?.checkOut ||
+          Number(effectiveContext?.guests || 0) > 0 ||
+          Number(effectiveContext?.selectedHotelId || 0) > 0,
+      );
+      const shouldEnforceStrictStep =
+        ["booking", "search", "filter"].includes(responseIntent) ||
+        ["booking", "searching", "selecting_hotel", "selecting_room", "confirming"].includes(responseMode) ||
+        hasActiveBookingContext;
+      const strictStep = shouldEnforceStrictStep ? getStrictCurrentStep(effectiveContext, confirmDraft) : 7;
+      const citySuggestionMatch = String(assistantText || "").match(/Did you mean\s+([^?]+)\?/i);
+      const hasCityValidationReply =
+        Boolean(citySuggestionMatch) ||
+        /there is no city called|couldn't find ".+" as a city/i.test(String(assistantText || ""));
+      if (citySuggestionMatch?.[1]) {
+        setPendingCitySuggestion(citySuggestionMatch[1].trim());
+      } else if (hasCityValidationReply) {
+        setPendingCitySuggestion(null);
+      }
+      if (strictStep === 2 && !hasCityValidationReply) {
         setHotelOptions([]);
         setRoomOptions([]);
         assistantText = "Which city would you like to stay in?";
-      } else if (strictStep === 3) {
+      } else if (strictStep === 3 && !correctedCity) {
+        setHotelOptions([]);
         setRoomOptions([]);
-        assistantText = getMissingDatesGuestsMessage(effectiveContext) ||
+        navigateWithContext({ navigate, updateBookingUi, ctx: effectiveContext, fallbackGuests: 1 });
+        // Prefix with the saved city name so the user knows it was heard.
+        const missingMsg = getMissingDatesGuestsMessage(effectiveContext) ||
           "Please provide your check-in date, check-out date, and number of guests.";
+        assistantText = effectiveContext.city
+          ? `${effectiveContext.city} is saved. ${missingMsg}`
+          : missingMsg;
       } else if (strictStep === 4) {
         const hotelsResp = await bookingApi.listHotels({
           city: effectiveContext?.anyCity ? undefined : effectiveContext?.city,
@@ -1603,7 +2332,7 @@ export default function BookingAssistant({ embedded = false }) {
     }
   }
 
-  async function confirmBooking() {
+  async function continueToPayment() {
     if (!confirmDraft || loading) return;
     if (!auth.isAuthenticated) {
       pushTurn("assistant", "Please log in to complete your booking.");
@@ -1616,72 +2345,48 @@ export default function BookingAssistant({ embedded = false }) {
       setConfirmDraft(null);
       return;
     }
-    if (!confirmDraft.paymentMethod) {
-      pushTurn("assistant", "Please select a payment method before I complete the booking.");
-      return;
-    }
-
-    // Past-date guard: catch stale dates before hitting the API.
-    const _today = todayIso();
-    if (confirmDraft.checkIn < _today) {
-      const currentYear = new Date().getFullYear();
-      pushTurn(
-        "assistant",
-        `Your check-in date (${confirmDraft.checkIn}) is in the past. ` +
-        `Please tell me new dates — e.g. "check-in ${currentYear}-06-10 check-out ${currentYear}-06-13" — and I'll prepare a fresh booking.`,
-      );
-      setConfirmDraft(null);
-      return;
-    }
-
-    setLoading(true);
-    const baseChat = [...chat];
-    try {
-      try {
-        const myBookings = await bookingApi.myBookings();
-        const duplicate = (myBookings || []).some(
-          (b) =>
-            Number(b.hotelId) === Number(confirmDraft.hotel.id) &&
-            Number(b.roomTypeId) === Number(confirmDraft.room.id) &&
-            b.startDate === confirmDraft.checkIn &&
-            b.endDate === confirmDraft.checkOut &&
-            b.status !== "CANCELLED",
-        );
-        if (duplicate) {
-          pushTurn("assistant", "I stopped because this booking already exists in your account.", baseChat);
-          setConfirmDraft(null);
-          return;
-        }
-      } catch {
-        // If duplicate-check endpoint is unavailable for this user, continue with booking attempt.
-      }
-
-      const booking = await bookingApi.createBooking(buildBookingCreatePayload(confirmDraft));
-      const payment = await bookingApi.createPayment(booking.id);
-      await bookingApi.processPayment(payment.id, true);
-      const confirmed = await bookingApi.confirmBooking(booking.id);
-
-      pushTurn("assistant", "Your booking is confirmed. Opening your confirmation page.", baseChat);
-      navigate(`/confirmation/${booking.id}`, {
-        state: { booking: confirmed, hotel: confirmDraft.hotel, room: confirmDraft.room, payment },
-      });
-      setConfirmDraft(null);
-    } catch (err) {
-      pushTurn("assistant", humanizeError(err) + " You can retry confirmation or adjust details.", baseChat);
-    } finally {
-      setLoading(false);
-    }
+    const q = new URLSearchParams();
+    if (confirmDraft.hotel?.city) q.set("city", confirmDraft.hotel.city);
+    q.set("from", confirmDraft.checkIn);
+    q.set("to", confirmDraft.checkOut);
+    q.set("guests", String(confirmDraft.guests));
+    updateBookingUi({
+      city: confirmDraft.hotel?.city || "",
+      checkInDate: confirmDraft.checkIn,
+      checkOutDate: confirmDraft.checkOut,
+      guests: Number(confirmDraft.guests || 1),
+    });
+    pushTurn("assistant", "Opening payment form. Choose card or cash and finish booking there.");
+    navigate(`/hotels/${confirmDraft.hotel.id}?${q.toString()}#room-types`, {
+      state: {
+        intent: {
+          hotelId: confirmDraft.hotel.id,
+          roomTypeId: confirmDraft.room.id,
+          checkIn: confirmDraft.checkIn,
+          checkOut: confirmDraft.checkOut,
+          guests: Number(confirmDraft.guests || 1),
+          fromAssistant: true,
+          openPayment: true,
+        },
+      },
+    });
+    setConfirmDraft(null);
   }
 
   function resetConversation() {
     setContext({});
     setChat([]);
+    setMessage("");
     setConfirmDraft(null);
     setHotelOptions([]);
     setRoomOptions([]);
     setSelectedRoomOptionId(null);
+    setPickDialog(null);
+    setAssistantPickerDismissed(false);
     setGuideEnabled(false);
+    setPendingCitySuggestion(null);
     saveMemory({ context: {}, history: [] });
+    if (!embedded) resetAssistantToBottomRight(posRef, setPos);
   }
 
   // ── Local hotel-selection flow (no AI round-trip) ──────────────────────────
@@ -1768,20 +2473,69 @@ export default function BookingAssistant({ embedded = false }) {
 
   function chooseRoomOption(room) {
     if (!room || loading) return;
+    const guestsN = Number(context.guests || 0);
+    if (Number(room.capacity || 0) < guestsN) {
+      pushTurn(
+        "assistant",
+        `"${room.name}" only holds up to ${room.capacity} guest(s). You requested ${guestsN}. Pick a room with enough capacity below.`,
+      );
+      return;
+    }
     setSelectedRoomOptionId(Number(room.id));
-    setRoomOptions([]);
     sendMessage(room.name);
   }
 
   function startGuidedFlow() {
-    setGuideEnabled(true);
     if (loading) return;
-    const question = getGuideQuestion(context, confirmDraft);
+    const nextContext = {};
+    const question = getGuideQuestion(nextContext, null);
     if (!question) return;
-    const last = chat[chat.length - 1];
-    if (last?.role === "assistant" && String(last?.content || "").trim() === question) return;
-    pushTurn("assistant", question);
+    const nextChat = [{ role: "assistant", content: question }];
+    setGuideEnabled(true);
+    setPendingCitySuggestion(null);
+    setContext(nextContext);
+    setChat(nextChat);
+    setMessage("");
+    setConfirmDraft(null);
+    setHotelOptions([]);
+    setRoomOptions([]);
+    setSelectedRoomOptionId(null);
+    setPickDialog(null);
+    setAssistantPickerDismissed(false);
+    saveMemory({ context: nextContext, history: nextChat });
+    queueMicrotask(() => {
+      scrollerRef.current?.scrollTo({ top: scrollerRef.current.scrollHeight, behavior: "smooth" });
+      inputRef.current?.focus();
+    });
   }
+
+  const pickerIdsKey = useMemo(() => {
+    if (confirmDraft) return "";
+    const h = hotelOptions.map((x) => x.id).join(",");
+    const r = roomOptions.map((x) => x.id).join(",");
+    if (!h && !r) return "";
+    return `${h}|${r}`;
+  }, [confirmDraft, hotelOptions, roomOptions]);
+
+  useEffect(() => {
+    if (!pickerIdsKey) return;
+    setAssistantPickerDismissed(false);
+  }, [pickerIdsKey]);
+
+  const hasAssistantPickerOptions =
+    open && !confirmDraft && (hotelOptions.length > 0 || roomOptions.length > 0);
+  const assistantPickerModalOpen = hasAssistantPickerOptions && !assistantPickerDismissed;
+
+  useEffect(() => {
+    if (!assistantPickerModalOpen) return;
+    const onKey = (e) => {
+      if (e.key === "Escape") setAssistantPickerDismissed(true);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [assistantPickerModalOpen]);
 
   const hasUnread = !open && chat.length > 0 && chat[chat.length - 1]?.role === "assistant";
   const flowStep = getFlowStep(context, confirmDraft);
@@ -1809,7 +2563,14 @@ export default function BookingAssistant({ embedded = false }) {
           onPointerDown={startDrag}
           onClick={() => {
             if (dragRef.current.moved) return;
-            setOpen((v) => !v);
+            setOpen((v) => {
+              const next = !v;
+              // When closing, reset position back to bottom-right for next open.
+              if (v === true && next === false) {
+                resetAssistantToBottomRight(posRef, setPos);
+              }
+              return next;
+            });
           }}
           aria-label={open ? "Close QuickReserve AI" : "Open QuickReserve AI"}
         >
@@ -1863,18 +2624,16 @@ export default function BookingAssistant({ embedded = false }) {
               </div>
             </div>
             <div style={{ display: "flex", gap: 8 }}>
-              {!guideEnabled ? (
-                <button
-                  type="button"
-                  className="assistant-head__newChat"
-                  onClick={startGuidedFlow}
-                  disabled={loading}
-                  aria-label="Guide me"
-                  title="Guide me"
-                >
-                  Guide me
-                </button>
-              ) : null}
+              <button
+                type="button"
+                className="assistant-head__newChat"
+                onClick={startGuidedFlow}
+                disabled={loading}
+                aria-label={guideEnabled ? "Restart guide" : "Guide me"}
+                title={guideEnabled ? "Restart guide" : "Guide me"}
+              >
+                {guideEnabled ? "Restart guide" : "Guide me"}
+              </button>
               <button
                 type="button"
                 className="assistant-head__newChat"
@@ -1948,60 +2707,31 @@ export default function BookingAssistant({ embedded = false }) {
 
           {/* Confirm / payment */}
           <div className="assistant-confirm">
-            {hotelOptions.length > 0 && !confirmDraft ? (
-              <div className="assistant-roomOptions">
-                {hotelOptions.map((hotel) => (
-                  <button
-                    key={hotel.id}
-                    type="button"
-                    className="assistant-roomOption"
-                    onClick={() => chooseHotelOption(hotel)}
-                    disabled={loading}
-                  >
-                    <span>{hotel.name}</span>
-                    <small>
-                      {hotel.city || "Hotel"}
-                      {hotel.price > 0 ? ` | from ${money(hotel.price)}` : ""}
-                    </small>
-                  </button>
-                ))}
-              </div>
-            ) : null}
-            {roomOptions.length > 0 && !confirmDraft ? (
-              <div className="assistant-roomOptions">
-                {roomOptions.map((room) => {
-                  const isSelected = Number(selectedRoomOptionId) === Number(room.id);
-                  return (
-                    <button
-                      key={room.id}
-                      type="button"
-                      className={`assistant-roomOption ${isSelected ? "assistant-roomOption--selected" : ""}`}
-                      onClick={() => chooseRoomOption(room)}
-                      disabled={loading}
-                    >
-                      <span>{room.name}</span>
-                      <small>{money(room.basePrice)} | cap {room.capacity}</small>
-                    </button>
-                  );
-                })}
-              </div>
+            {(hotelOptions.length > 0 || roomOptions.length > 0) && !confirmDraft ? (
+              <button
+                type="button"
+                className="assistant-pickTrigger"
+                onClick={() => {
+                  if (hotelOptions.length > 0) {
+                    setPickDialog({ type: "hotel", title: `Step 4: Choose your hotel (${hotelOptions.length} options)`, items: hotelOptions });
+                  } else {
+                    setPickDialog({ type: "room", title: `Step 5: Choose your room type (${roomOptions.length} options)`, items: roomOptions });
+                  }
+                }}
+                disabled={loading}
+              >
+                <svg width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden>
+                  <path d="M10 2a8 8 0 100 16A8 8 0 0010 2zm0 4v4m0 4h.01" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                </svg>
+                {hotelOptions.length > 0
+                  ? `${hotelOptions.length} hotel${hotelOptions.length !== 1 ? "s" : ""} available — tap to choose`
+                  : `${roomOptions.length} room type${roomOptions.length !== 1 ? "s" : ""} available — tap to choose`}
+              </button>
             ) : null}
             {confirmDraft ? (
               <>
-                <select
-                  value={confirmDraft.paymentMethod || ""}
-                  onChange={(e) =>
-                    setConfirmDraft((current) =>
-                      current ? { ...current, paymentMethod: e.target.value } : current,
-                    )
-                  }
-                  disabled={loading}
-                >
-                  <option value="">Select payment method</option>
-                  <option value="mock_card">Card (auto-filled)</option>
-                </select>
-                <button type="button" className="btn btn-primary btn-small" onClick={confirmBooking} disabled={loading}>
-                  Confirm booking
+                <button type="button" className="btn btn-primary btn-small" onClick={continueToPayment} disabled={loading}>
+                  Continue to payment
                 </button>
                 <button type="button" className="btn btn-outline btn-small" onClick={() => setConfirmDraft(null)} disabled={loading}>
                   Cancel
@@ -2009,6 +2739,68 @@ export default function BookingAssistant({ embedded = false }) {
               </>
             ) : null}
           </div>
+        {/* ── Pick dialog ─────────────────────────────────────────────────── */}
+        {pickDialog && !confirmDraft && (
+          <div className="assistant-dialogBackdrop" onClick={() => setPickDialog(null)}>
+            <div
+              className="assistant-dialog"
+              onClick={(e) => e.stopPropagation()}
+              role="dialog"
+              aria-modal="true"
+              aria-label={pickDialog.title}
+            >
+              <div className="assistant-dialogHead">
+                <strong>{pickDialog.title}</strong>
+                <button
+                  type="button"
+                  className="assistant-dialogClose"
+                  onClick={() => setPickDialog(null)}
+                  aria-label="Close"
+                >
+                  <svg width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden>
+                    <path d="M5 5l10 10M15 5L5 15" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"/>
+                  </svg>
+                </button>
+              </div>
+              <div className="assistant-dialogList">
+                {pickDialog.type === "hotel"
+                  ? pickDialog.items.map((hotel) => (
+                      <button
+                        key={hotel.id}
+                        type="button"
+                        className="assistant-dialogItem"
+                        onClick={() => { setPickDialog(null); chooseHotelOption(hotel); }}
+                        disabled={loading}
+                      >
+                        <span className="assistant-dialogItem__name">
+                          <span className="assistant-dialogItem__index">{pickDialog.items.indexOf(hotel) + 1}.</span> {hotel.name}
+                        </span>
+                        <span className="assistant-dialogItem__meta">
+                          {hotel.city || "Hotel"}
+                          {hotel.price > 0 ? ` · from ${money(hotel.price)}` : ""}
+                        </span>
+                      </button>
+                    ))
+                  : pickDialog.items.map((room) => (
+                      <button
+                        key={room.id}
+                        type="button"
+                        className={`assistant-dialogItem${Number(selectedRoomOptionId) === Number(room.id) ? " assistant-dialogItem--selected" : ""}`}
+                        onClick={() => { setPickDialog(null); chooseRoomOption(room); }}
+                        disabled={loading}
+                      >
+                        <span className="assistant-dialogItem__name">
+                          <span className="assistant-dialogItem__index">{pickDialog.items.indexOf(room) + 1}.</span> {room.name}
+                        </span>
+                        <span className="assistant-dialogItem__meta">
+                          {money(room.basePrice)} · up to {room.capacity} guest{Number(room.capacity) !== 1 ? "s" : ""}
+                        </span>
+                      </button>
+                    ))}
+              </div>
+            </div>
+          </div>
+        )}
         </section>
       )}
     </div>
