@@ -1,5 +1,9 @@
+import { useEffect } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 import { formatDate, money } from "../utils/format";
+
+const ASSISTANT_AWAITING_BOOKING_SUCCESS_KEY = "quickreserve-ai-awaiting-booking-success-v1";
+const ASSISTANT_BOOKING_SUCCESS_EVENT = "quickreserve:booking-success";
 
 export default function BookingConfirmation() {
   const { bookingId } = useParams();
@@ -7,6 +11,20 @@ export default function BookingConfirmation() {
   const booking = state?.booking;
   const payment = state?.payment;
   const pricing = state?.pricing;
+
+  useEffect(() => {
+    const awaiting = sessionStorage.getItem(ASSISTANT_AWAITING_BOOKING_SUCCESS_KEY) === "1";
+    if (!awaiting) return;
+
+    const status = String(payment?.status || "");
+    const paymentSucceeded = status === "PAID" || status === "PENDING_CASH_COLLECTION";
+    const bookingSucceeded = Boolean(booking?.id || bookingId);
+
+    if (bookingSucceeded && paymentSucceeded) {
+      sessionStorage.removeItem(ASSISTANT_AWAITING_BOOKING_SUCCESS_KEY);
+      window.dispatchEvent(new Event(ASSISTANT_BOOKING_SUCCESS_EVENT));
+    }
+  }, [booking?.id, bookingId, payment?.status]);
 
   return (
     <section className="container confirmation-page">

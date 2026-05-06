@@ -3367,6 +3367,88 @@ button.notif-row--btn:disabled {
   color: var(--ink);
 }
 
+.assistant-datesGuests {
+  margin: 12px 12px 0;
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--line) 75%, transparent);
+  background: linear-gradient(180deg, var(--surface) 0%, color-mix(in srgb, var(--surface) 78%, var(--surface-muted)) 100%);
+  box-shadow: 0 12px 26px rgba(47, 24, 68, 0.08);
+  display: grid;
+  gap: 12px;
+}
+
+.assistant-datesGuests__row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.assistant-datesGuests__row--guests {
+  grid-template-columns: 1fr;
+}
+
+.assistant-datesGuests__field {
+  display: grid;
+  gap: 6px;
+}
+
+.assistant-datesGuests__label {
+  font-size: 0.8rem;
+  font-weight: 900;
+  color: color-mix(in srgb, var(--muted) 75%, var(--ink));
+  letter-spacing: 0.03em;
+}
+
+.assistant-datesGuests__field input[type="date"] {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 10px 12px;
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.assistant-datesGuests__field input[type="date"]:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--teal) 45%, var(--line));
+  box-shadow: 0 0 0 4px var(--focus-ring);
+}
+
+.assistant-datesGuests__guestsHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.assistant-datesGuests__value {
+  font-size: 1rem;
+  color: var(--purple);
+}
+
+.assistant-datesGuests input[type="range"] {
+  width: 100%;
+  accent-color: var(--teal);
+}
+
+.assistant-datesGuests__actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.assistant-datesGuests__apply {
+  border-radius: 14px;
+  padding: 10px 14px;
+  font-weight: 900;
+}
+
+@media (max-width: 420px) {
+  .assistant-datesGuests__row {
+    grid-template-columns: 1fr;
+  }
+}
+
 .assistant-confirm {
   display: flex;
   gap: 8px;

@@ -194,15 +194,14 @@ function extractGuestsCount(text) {
   return extractAssistantGuestsCount(text);
 }
 
+const GUIDED_FLOW_TOTAL_STEPS = 5;
+
 function getGuideQuestion(context, confirmDraft) {
   if (!context?.city && !context?.anyCity && !Number(context?.selectedHotelId || 0)) {
     return "Great — step 1: which city do you want to stay in? (Or say: any city)";
   }
-  if (!context?.checkIn || !context?.checkOut) {
-    return "Step 2: what are your check-in and check-out dates? (YYYY-MM-DD)";
-  }
-  if (!Number(context?.guests || 0)) {
-    return "Step 3: how many guests will stay?";
+  if (!context?.checkIn || !context?.checkOut || !Number(context?.guests || 0)) {
+    return "Step 2: what are your check-in and check-out dates? (YYYY-MM-DD) and how many guests?";
   }
   if (confirmDraft) {
     return "Everything is ready. Please choose a payment method, then confirm booking.";
@@ -218,11 +217,10 @@ function getFlowStep(context, confirmDraft) {
   const hasRoom = Number(context?.selectedRoomTypeId || 0) > 0;
 
   if (!hasCity && !hasHotel) return { number: 1, label: "Choose destination" };
-  if (!hasDates) return { number: 2, label: "Choose dates" };
-  if (!hasGuests) return { number: 3, label: "Choose guests" };
-  if (!hasHotel) return { number: 4, label: "Choose hotel" };
-  if (!hasRoom) return { number: 5, label: "Choose room type" };
-  return confirmDraft ? { number: 6, label: "Confirm booking" } : { number: 6, label: "Confirm booking" };
+  if (!hasDates || !hasGuests) return { number: 2, label: "Dates & guests" };
+  if (!hasHotel) return { number: 3, label: "Choose hotel" };
+  if (!hasRoom) return { number: 4, label: "Choose room type" };
+  return confirmDraft ? { number: 5, label: "Confirm booking" } : { number: 5, label: "Confirm booking" };
 }
 
 function navigateWithContext({ navigate, updateBookingUi, ctx, fallbackGuests = 1 }) {
@@ -974,11 +972,11 @@ export default function HomeAiAssistant({ cities: _cities } = {}) {
         {guideEnabled ? (
           <div className="assistant-stepper" aria-label="Booking progress">
             <div className="assistant-stepper__top">
-              <span>{`Step ${flowStep.number} of 6`}</span>
+              <span>{`Step ${flowStep.number} of ${GUIDED_FLOW_TOTAL_STEPS}`}</span>
               <small>{flowStep.label}</small>
             </div>
             <div className="assistant-stepper__bar" role="presentation">
-              <span style={{ width: `${Math.round((flowStep.number / 6) * 100)}%` }} />
+              <span style={{ width: `${Math.round((flowStep.number / GUIDED_FLOW_TOTAL_STEPS) * 100)}%` }} />
             </div>
           </div>
         ) : null}
