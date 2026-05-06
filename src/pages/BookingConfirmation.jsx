@@ -6,6 +6,7 @@ export default function BookingConfirmation() {
   const { state } = useLocation();
   const booking = state?.booking;
   const payment = state?.payment;
+  const pricing = state?.pricing;
 
   return (
     <section className="container confirmation-page">
@@ -37,10 +38,15 @@ export default function BookingConfirmation() {
             </div>
             <div>
               <span>Total</span>
-              <strong>{money(booking.totalPrice)}</strong>
+              <strong>{money(pricing?.finalTotal ?? booking.totalPrice)}</strong>
             </div>
           </div>
         )}
+        {pricing?.discountAmount > 0 ? (
+          <p className="muted" style={{ marginTop: "10px" }}>
+            Discount applied: -{money(pricing.discountAmount)} ({pricing.reasons?.join(", ")}).
+          </p>
+        ) : null}
         <div className="hero-actions">
           <Link className="btn btn-primary" to="/my-bookings">
             Manage booking
