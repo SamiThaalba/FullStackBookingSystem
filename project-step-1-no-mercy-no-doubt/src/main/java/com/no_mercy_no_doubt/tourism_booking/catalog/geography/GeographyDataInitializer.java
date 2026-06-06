@@ -19,7 +19,7 @@ import java.util.Optional;
 
 /**
  * Seeds {@link Country} and {@link City} when empty, then sets {@code hotels.city_id} from legacy
- * legacy {@code hotels.city} / {@code hotels.country} columns (read via JDBC) or a default city.
+ * {@code hotels.city} / {@code hotels.country} columns (read via JDBC) or a default city.
  */
 @Component
 @Order(5)
@@ -33,7 +33,6 @@ public class GeographyDataInitializer implements CommandLineRunner {
     private final JdbcTemplate jdbcTemplate;
 
     @Override
-    @Transactional
     public void run(String... args) {
         if (countryRepository.count() == 0) {
             seedReferenceData();
@@ -42,11 +41,16 @@ public class GeographyDataInitializer implements CommandLineRunner {
         if (fallback == null) {
             return;
         }
-        backfillFromLegacyColumns(fallback);
+        try {
+            backfillFromLegacyColumns(fallback);
+        } catch (Exception e) {
+            log.warn("Skipping legacy hotel city backfill (fresh DB or columns absent): {}", e.getMessage());
+        }
         assignFallbackToRemaining(fallback);
     }
 
-    private void seedReferenceData() {
+    @Transactional
+    protected void seedReferenceData() {
         Map<String, List<String>> data = new LinkedHashMap<>();
         data.put("Palestine", List.of(
                 "Bethlehem", "Jerusalem", "Ramallah", "Hebron", "Nablus",
@@ -75,7 +79,7 @@ public class GeographyDataInitializer implements CommandLineRunner {
         return fallbackOpt.orElse(null);
     }
 
-    private void backfillFromLegacyColumns(City fallback) {
+    protected void backfillFromLegacyColumns(City fallback) {
         try {
             List<Map<String, Object>> rows = jdbcTemplate.queryForList(
                     "SELECT id, city, country FROM hotels WHERE city_id IS NULL");
@@ -94,10 +98,12 @@ public class GeographyDataInitializer implements CommandLineRunner {
             }
         } catch (DataAccessException ex) {
             log.debug("Skipping JDBC legacy hotel city backfill: {}", ex.getMessage());
+            throw ex; // rethrow so run() catch block fires
         }
     }
 
-    private void assignFallbackToRemaining(City fallback) {
+    @Transactional
+    protected void assignFallbackToRemaining(City fallback) {
         for (Hotel hotel : hotelRepository.findAll()) {
             if (hotel.getLocatedCity() == null) {
                 hotel.setLocatedCity(fallback);
