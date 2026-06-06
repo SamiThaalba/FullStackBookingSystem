@@ -1,3 +1,19 @@
+# Frontend
 node_modules/
 dist/
 .env
+
+# Backend secrets
+tourism-booking-backend/src/main/resources/application.properties
+tourism-booking-backend/src/test/resources/application-test.properties
+
+# IntelliJ
+.idea/
+*.iml
+
+# Maven
+tourism-booking-backend/target/
+
+# OS
+.DS_Store
+Thumbs.db
